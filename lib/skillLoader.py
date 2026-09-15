@@ -8,7 +8,7 @@
 
 import os, re
 BASE_DIR         = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SKILLS_BASE      = os.path.join(BASE_DIR, "skills")
+SKILLS_BASE = os.path.expanduser("~/.claude/skills")
 SKILL_CHAR_LIMIT = 3000    # ~750 tokens — enough for instructions, not entire reference books
 IGNORE_FILES     = {"README.md", "LICENSE", "LICENSE.md", ".gitignore"}
 

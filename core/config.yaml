@@ -19,95 +19,99 @@
 # -------------------------------------------------------------------
 
 model_list:
-  # placeholder entry for "auto" - this only matters if router_hook.py
-  # somehow fails to run at all, since normally the hook rewrites the
-  # model name before this entry would ever get used
+  # Default placeholder for 'auto' (rewritten by routerHook)
   - model_name: auto
     litellm_params:
       model: gemini/gemini-3.5-flash-lite
       api_key: os.environ/GEMINI_API_KEY
 
-  # Fast group: everyday stuff, tried top to bottom
+  # =================================================================
+  # FAST GROUP: Tried in sequence; high speed & high rate limits
+  # =================================================================
+  # 1. Google Gemini Direct (Ultra-fast, high free-tier limits)
   - model_name: fast
     litellm_params:
       model: gemini/gemini-3.5-flash-lite
       api_key: os.environ/GEMINI_API_KEY
   - model_name: fast
     litellm_params:
-      model: groq/qwen/qwen3.6-27b
+      model: gemini/gemini-3.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+  - model_name: fast
+    litellm_params:
+      model: gemini/gemini-3.6-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+  # 2. Groq Direct (Near-instant inference speeds)
+  - model_name: fast
+    litellm_params:
+      model: groq/qwen/qwen3.8-27b
       api_key: os.environ/GROQ_API_KEY
+  - model_name: fast
+    litellm_params:
+      model: groq/openai/gpt-oss-20b
+      api_key: os.environ/GROQ_API_KEY
+
+  # 3. OpenRouter Free Tier (Reliable fallbacks within the fast group)
   - model_name: fast
     litellm_params:
       model: openrouter/google/gemma-4-31b-it:free
       api_key: os.environ/OPENROUTER_API_KEY
   - model_name: fast
     litellm_params:
-      model: openrouter/inclusionai/ling-3.0-flash-vl:free
+      model: openrouter/google/gemma-4-26b-a4b-it:free
       api_key: os.environ/OPENROUTER_API_KEY
   - model_name: fast
     litellm_params:
-      model: openrouter/liquid/lfm-2.5-2.6b:free
-      api_key: os.environ/OPENROUTER_API_KEY
-  - model_name: fast
-    litellm_params:
-      model: openrouter/thinkingmachines/inkling-small:free
-      api_key: os.environ/OPENROUTER_API_KEY
-  - model_name: fast
-    litellm_params:
-      model: openrouter/qwen/qwen-2.5-coder-32b-instruct
+      model: openrouter/z-ai/glm-5.2:free
       api_key: os.environ/OPENROUTER_API_KEY
 
-  # Smart group: harder reasoning / planning work
+  # =================================================================
+  # SMART GROUP: Deep reasoning & coding (slower/larger models)
+  # =================================================================
+  # 1. Google Gemini Pro (State of the art reasoning)
   - model_name: smart
     litellm_params:
-      model: gemini/gemini-2.5-pro
+      model: gemini/gemini-3.1-pro-preview
       api_key: os.environ/GEMINI_API_KEY
-  - model_name: smart
-    litellm_params:
-      model: gemini/gemini-pro-latest
-      api_key: os.environ/GEMINI_API_KEY
+
+  # 2. Groq Large (Fast execution of large architectures)
   - model_name: smart
     litellm_params:
       model: groq/openai/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
-  - model_name: smart
-    litellm_params:
-      model: openrouter/nvidia/nemotron-3.5-lightning:free
-      api_key: os.environ/OPENROUTER_API_KEY
-  - model_name: smart
-    litellm_params:
-      model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
-      api_key: os.environ/OPENROUTER_API_KEY
-  - model_name: smart
-    litellm_params:
-      model: openrouter/thinkingmachines/inkling:free
-      api_key: os.environ/OPENROUTER_API_KEY
+
+  # 3. OpenRouter Frontier & Code Models
   - model_name: smart
     litellm_params:
       model: openrouter/deepseek/deepseek-r1
       api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: smart
+    litellm_params:
+      model: openrouter/qwen/qwen-2.5-coder-32b-instruct
+      api_key: os.environ/OPENROUTER_API_KEY
 
-  # Local group: Native inference running out of the model/ directory
+  # =================================================================
+  # LOCAL GROUP: Native GGUF models running via llama.cpp
+  # =================================================================
   - model_name: local
     litellm_params:
       model: openai/local
       api_base: http://localhost:8000/v1
       api_key: sk-local
 
-# settings for how the proxy behaves when a model in a group fails
+# ===================================================================
+# ROUTING & FALLBACK MECHANICS
+# ===================================================================
 router_settings:
-  routing_strategy: simple-shuffle    # try models in order, shuffle equal options
-  num_retries: 2                      # retry a failed request up to 2 times
-  allowed_fails: 2                    # max errors allowed before putting a model on cooldown
-  cooldown_time: 86400                # pause failed models for 24 hours (matches daily free limits)
+  routing_strategy: usage-based-routing
+  num_retries: 8
+  allowed_fails: 1
+  cooldown_time: 3600
 
 litellm_settings:
-  # loads the routing script that automatically switches "auto" to "fast" or "smart"
   callbacks: ["routerHook.router_hook_instance"]
+  fallbacks: [{"fast": ["smart"]}]
 
-  # if all models in one group fail, drop down to the other group
-  fallbacks: [{"fast": ["smart"]}, {"smart": ["fast"]}]
-
-# authenticates requests sent to the local proxy using your environment's master key
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

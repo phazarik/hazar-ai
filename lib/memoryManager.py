@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 # ------------------------------------------------------------------------------
-# This module manages the persistent conversation memory for the AI.
-# It maintains a rolling window of recent messages, automatically summarizes
-# older messages to save context space, and keeps a deduplicated file cache.
+# Memory manager module
+#
+# This module maintains the persistent conversation memory for the workspace.
+# It uses a rolling window approach: keeping recent messages intact while
+# summarizing older messages to conserve token space. Cached files are hashed
+# to prevent duplicate context loading.
 # ------------------------------------------------------------------------------
 
-import os, json, hashlib, requests
+import os
+import json
+import hashlib
+import requests
 from datetime import datetime
 from typing import Any
 
@@ -15,12 +21,16 @@ GRAPH_FILE   = os.path.join(MEMORY_DIR, "graph.json")
 SUMMARY_FILE = os.path.join(MEMORY_DIR, "summary.txt")
 FILES_FILE   = os.path.join(MEMORY_DIR, "files.json")
 
-WINDOW_SIZE  = 20    # Maximum turns to keep before compressing
-COMPACT_KEEP = 10    # Number of recent turns to keep exactly as they are
+## WINDOW_SIZE defines the max turns before triggering summarization.
+## COMPACT_KEEP defines how many recent turns remain untouched after a summary.
+WINDOW_SIZE  = 20
+COMPACT_KEEP = 10
 
 PROXY_URL     = "http://127.0.0.1:4000/chat/completions"
 PROXY_HEADERS = {"Content-Type": "application/json", "Authorization": "Bearer sk-anything"}
 
+## A strict, concatenated string prompt to instruct the model on how to compress memory.
+## Implicit string concatenation is used to avoid problematic multi-line string syntax.
 COMPACT_PROMPT = (
     "You are a memory compressor for an ongoing AI coding session. "
     "Produce a dense, structured summary that preserves:\n"
@@ -33,59 +43,57 @@ COMPACT_PROMPT = (
 )
 
 # ------------------------------------------------------------------------------
-# Internal file helpers
+# Core I/O Helpers
 # ------------------------------------------------------------------------------
-     
-# Safely reads a JSON file and returns a default value if it fails or is missing
+
+## Safely reads a JSON file. Employs the os module to verify existence
+## rather than relying on exception handling.
 def readJson(path: str, defaultVal: Any) -> Any:
     if not os.path.exists(path): return defaultVal
-    with open(path) as f: return json.load(f)
+    with open(path) as f:        return json.load(f)
 
-# Safely writes data to a JSON file and creates the directory if needed
+## Ensures the destination directory exists via the os module, then writes JSON.
 def writeJson(path: str, data: Any):
     if not os.path.exists(MEMORY_DIR): os.makedirs(MEMORY_DIR)
-    with open(path, "w") as f: json.dump(data, f, indent=2)
+    with open(path, "w") as f:    json.dump(data, f, indent=2)
 
-# ------------------------------------------------------------------------------
-# Data loading & saving
-# ------------------------------------------------------------------------------
-
-# Loads the recent conversation turns
 def loadGraph() -> list:
     return readJson(GRAPH_FILE, [])
 
-# Saves the recent conversation turns
 def saveGraph(turns: list):
     writeJson(GRAPH_FILE, turns)
 
-# Loads the hashed files cache
 def loadFiles() -> dict:
     return readJson(FILES_FILE, {})
 
-# Saves the hashed files cache
 def saveFiles(files: dict):
     writeJson(FILES_FILE, files)
 
-# Loads the long-term memory summary text
 def loadSummary() -> str:
     if not os.path.exists(SUMMARY_FILE): return ""
-    with open(SUMMARY_FILE) as f: return f.read().strip()
+    with open(SUMMARY_FILE) as f:        return f.read().strip()
 
-# Saves the long-term memory summary text
 def saveSummary(text: str):
     if not os.path.exists(MEMORY_DIR): os.makedirs(MEMORY_DIR)
     with open(SUMMARY_FILE, "w") as f: f.write(text)
 
-# Creates a short hash of the file content so we do not save duplicates
+## Generates a short SHA-256 hash for raw text to track file duplications.
 def hashContent(content: str) -> str:
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
-# Summarizes older conversation turns through the API to save context space
+# ------------------------------------------------------------------------------
+# Compression Logic
+# ------------------------------------------------------------------------------
+
+## When the history gets too large, this function slices the oldest turns,
+## formats them, and asks the local proxy (fast model) to summarize them.
 def compactTurns(turns: list) -> list:
     oldTurns  = turns[:-COMPACT_KEEP]
     keepTurns = turns[-COMPACT_KEEP:]
-    flat      = "\n\n".join(f"[{t['role'].upper()}] {t['content']}" for t in oldTurns)
-    existing  = loadSummary()
+    
+    ## Flatten the old dialogue into a single readable string
+    flat = "\n\n".join(f"[{t['role'].upper()}] {t['content']}" for t in oldTurns)
+    existing = loadSummary()
     if existing: flat = f"[PREVIOUS SUMMARY]\n{existing}\n\n[NEW TURNS]\n{flat}"
 
     print(">> Compacting memory...")
@@ -106,25 +114,23 @@ def compactTurns(turns: list) -> list:
     print(">> Compaction failed. Keeping full history.")
     return turns
 
-# -----------------------------------------------------------------------------
-# Public API
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Public Interface
+# ------------------------------------------------------------------------------
 
-# Retrieves the full memory (summary + recent turns) and the cached files
+## Retrieves active context. Long-term memory is injected as a 'system' role
+## to take advantage of prompt caching on the provider side.
 def loadMemory() -> tuple[list, dict]:
     graph     = loadGraph()
     summary   = loadSummary()
     fileCache = loadFiles()
     messages  = []
-    
-    if summary:
-        messages.append({"role": "user", "content": f"[MEMORY CONTEXT]\n{summary}"})
-        messages.append({"role": "assistant", "content": "Understood, I have the context from our previous sessions."})
-        
-    messages.extend(graph)
+    if summary: messages.append({"role": "system", "content": f"[LONG-TERM MEMORY CONTEXT]\n{summary}"})
+    clean_graph = [{"role": m["role"], "content": m["content"]} for m in graph]
+    messages.extend(clean_graph)
     return messages, fileCache
 
-# Saves a new interaction and triggers compression if the history gets too long
+## Logs a new back-and-forth interaction. Triggers compression if limits are hit.
 def appendTurn(userContent: str, assistantContent: str, filesUsed: dict | None = None):
     graph = loadGraph()
     graph.append({"role": "user", "content": userContent, "ts": datetime.utcnow().isoformat()})
@@ -136,19 +142,17 @@ def appendTurn(userContent: str, assistantContent: str, filesUsed: dict | None =
         existing.update(filesUsed)
         saveFiles(existing)
 
-# Hashes file content and checks if it is already known in the cache
 def registerFile(path: str, content: str) -> tuple[str, bool]:
     sha   = hashContent(content)
     cache = loadFiles()
     return sha, (sha in cache)
 
-# Deletes all saved memory and cache files
+## Iterates through expected memory files and purges them via the os module.
 def clearMemory():
     for f in [GRAPH_FILE, SUMMARY_FILE, FILES_FILE]:
         if os.path.exists(f): os.remove(f)
     print(">> Memory cleared.")
 
-# Returns statistics about the current memory usage
 def memoryStatus() -> dict:
     graph   = loadGraph()
     summary = loadSummary()

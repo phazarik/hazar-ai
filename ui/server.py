@@ -1,41 +1,41 @@
 #!/usr/bin/env python3
 # ------------------------------------------------------------------------------
-# ui/server.py
+# Local Web Interface Backend
 #
-# Local web interface for PrachuGPT.
-# Run:  python3 ui/server.py
-# Open: http://localhost:5000
+# This script spins up a standard Python HTTP server. It serves static assets
+# for the UI and exposes a simple REST/SSE API to communicate with the proxy.
 #
-# Architecture:
-#   GET  /            -> serve index.html
-#   GET  /api/skills  -> list available skills
-#   GET  /api/status  -> memory status
-#   POST /api/query   -> run a query, stream events via SSE
-#   POST /api/clear   -> clear memory
-#
-# The /api/query endpoint returns an SSE stream with these event types:
-#   log    -> status/diagnostic lines (shown in the log pane)
-#   token  -> a single streamed token from the model
-#   done   -> query complete (carries usage stats as JSON)
-#   error  -> something went wrong
+# Architecture mapping:
+#   GET  /            -> serves index.html
+#   GET  /api/skills  -> lists available system prompts/skills
+#   GET  /api/status  -> provides memory diagnostic status
+#   POST /api/query   -> runs an LLM query and streams events via SSE
+#   POST /api/clear   -> clears historical memory caches
 # ------------------------------------------------------------------------------
 
-import sys, os, json
+import sys
+import os
+import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
-
-# Resolve the lib directory to import our custom modules
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(BASE_DIR, "lib"))
-import memoryManager as mem
-import skillLoader   as skills
 import requests as req_lib
 
+## Dynamically resolve the path to the 'lib' directory so custom modules 
+## can be imported reliably.
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(BASE_DIR, "lib"))
+
+import memoryManager as mem
+import skillLoader as skills
+
+## The proxy endpoint details. The UI server acts as a middleman, receiving
+## web traffic from the browser and formatting it for the LiteLLM proxy.
 PROXY_URL     = "http://127.0.0.1:4000/chat/completions"
 PROXY_HEADERS = {"Content-Type": "application/json", "Authorization": "Bearer sk-anything"}
 UI_DIR        = os.path.dirname(os.path.abspath(__file__))
 PORT          = 5000
 
+## Initializes the HTTP server on port 5000, listening to all local interfaces.
 def runServer():
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     print(f"PrachuGPT Web UI running at http://localhost:{PORT}")
@@ -43,22 +43,23 @@ def runServer():
     try: server.serve_forever()
     except KeyboardInterrupt: print("\nStopped.")
 
-# Safely tries to parse a JSON string, returning an empty dictionary on failure
+## Safely attempts to parse a string into JSON. Returns an empty dictionary
+## if the format is malformed to avoid crashing the server loop.
 def parseJsonSafe(dataStr: str) -> dict:
     if not dataStr: return {}
     try: return json.loads(dataStr)
     except Exception: return {}
 
-# ------------------------------------------------------------------------------
-# Server HTTP handler
-# ------------------------------------------------------------------------------
+## The core server class that handles every incoming HTTP connection.
 class Handler(BaseHTTPRequestHandler):
 
-    # Suppress default terminal access log noise
+    ## Suppresses standard terminal access log output to keep the terminal logs
+    ## readable, avoiding a wall of "GET / HTTP 200" messages.
     def log_message(self, fmt, *args): pass
 
-    # Sends a python dictionary as a standard JSON HTTP response
-    def _sendJson(self, data: dict, status: int = 200):
+    ## Helper method to format and send JSON responses back to the browser.
+    ## Automatically manages headers and CORS policy to ensure the frontend accepts it.
+    def sendJson(self, data: dict, status: int = 200):
         body = json.dumps(data).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -67,8 +68,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    # Sets up the HTTP connection for Server-Sent Events (live streaming)
-    def _sendSseHeaders(self):
+    # --------------------------------------------------------------------------
+    # Server-Sent Events (SSE) Protocol Helpers
+    # --------------------------------------------------------------------------
+
+    ## Prepares the HTTP headers to maintain an open connection for streaming data.
+    ## The 'text/event-stream' type tells the browser to keep reading chunks indefinitely.
+    def sendSseHeaders(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -76,17 +82,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
 
-    # Formats and sends a single SSE stream chunk to the web UI
-    def _writeSse(self, eventType: str, data: str):
+    ## Formats the event string according to SSE standards ("event: \n data: \n\n")
+    ## and flushes it immediately down the socket to the client.
+    def writeSse(self, eventType: str, data: str):
         try:
             chunk = f"event: {eventType}\ndata: {data}\n\n"
             self.wfile.write(chunk.encode())
             self.wfile.flush()
         except BrokenPipeError:
-            # The user closed the browser tab before the stream finished
+            ## Safely handles the scenario where a user closes the browser tab mid-stream.
             pass
 
-    # Handles CORS preflight checks from the browser
+    ## Handles Cross-Origin Resource Sharing (CORS) preflight requests.
+    ## This prevents the browser from blocking requests made via JavaScript.
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -94,41 +102,47 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
-    # Handles page loads and simple read-only API requests
+    ## Routes incoming GET requests based on the URL path.
+    ## Acts as a simple static file server for the UI elements, or responds with JSON
+    # for API read endpoints.
     def do_GET(self):
         path = urlparse(self.path).path
-        if path in ("/", "/index.html"): self._serveFile(os.path.join(UI_DIR, "index.html"), "text/html")
-        elif path == "/api/skills":      self._sendJson({"skills": skills.listSkills()})
-        elif path == "/api/status":      self._sendJson(mem.memoryStatus())
+        if path in ("/", "/index.html"): self.serveFile(os.path.join(UI_DIR, "index.html"), "text/html")
+        elif path == "/style.css":       self.serveFile(os.path.join(UI_DIR, "style.css"), "text/css")
+        elif path == "/script.js":       self.serveFile(os.path.join(UI_DIR, "script.js"), "application/javascript")
+        elif path == "/api/skills":      self.sendJson({"skills": skills.listSkills()})
+        elif path == "/api/status":      self.sendJson(mem.memoryStatus())
         else:
             self.send_response(404)
             self.end_headers()
 
-    # Handles AI queries and clear-memory actions
+    ## Routes incoming POST payloads to trigger specific actions (like inference).
     def do_POST(self):
-        path   = urlparse(self.path).path
+        path = urlparse(self.path).path
+        
+        ## Read the raw byte body from the incoming HTTP request and parse it to JSON.
         length = int(self.headers.get("Content-Length", 0))
-        body   = json.loads(self.rfile.read(length)) if length else {}
+        body = json.loads(self.rfile.read(length)) if length else {}
 
         if path == "/api/query":
-            self._handleQuery(body)
+            self.handleQuery(body)
         elif path == "/api/clear":
             mem.clearMemory()
-            self._sendJson({"ok": True})
+            self.sendJson({"ok": True})
         else:
             self.send_response(404)
             self.end_headers()
 
     # --------------------------------------------------------------------------
-    # Query & stream logic
+    # Core Proxy Passthrough Logic
     # --------------------------------------------------------------------------
-    # Connects to the LLM, builds context, and streams the response to the UI
-    def _handleQuery(self, body: dict):
-        self._sendSseHeaders()
+    
+    ## Executes the main LLM interaction. Builds the conversation context, opens a stream
+    ## to the proxy server, and pipes the data chunks back to the browser in real-time.
+    def handleQuery(self, body: dict):
+        self.sendSseHeaders()
 
-        # Helper to quickly send status messages to the UI's log panel
-        def logStream(msg: str): self._writeSse("log", msg)
-
+        ## Extract options defined by the web UI request payload.
         query     = body.get("query", "").strip()
         model     = body.get("model", "auto")
         skillName = body.get("skill", "").strip() or None
@@ -136,30 +150,43 @@ class Handler(BaseHTTPRequestHandler):
         maxTokens = int(body.get("maxTokens", 900))
 
         if not query:
-            self._writeSse("error", "Empty query.")
+            self.writeSse("error", "Empty query.")
             return
 
-        # Build the conversation history and inject skills
+        ## Step 1: Build context.
+        ## Load custom skills and previous conversation memory.
         messages = []
+        
         if skillName:
             skillMsgs = skills.buildSkillMessages(skillName)
             if skillMsgs:
-                logStream(f"Injecting skill: {skillName}")
+                self.writeSse("log", f"Injecting skill: {skillName}")
                 messages.extend(skillMsgs)
-            else: logStream(f"WARNING: Skill '{skillName}' not found.")
+            else:
+                self.writeSse("log", f"WARNING: Skill '{skillName}' not found.")
 
         if not noMemory:
             history, _ = mem.loadMemory()
             if history:
                 turns = sum(1 for m in history if m["role"] == "user")
-                logStream(f"Loaded {turns} turn(s) from memory.")
+                self.writeSse("log", f"Loaded {turns} turn(s) from memory.")
                 messages.extend(history)
-            else: logStream("No prior memory. Starting fresh.")
-        else: logStream("Memory disabled for this query.")
+            else: self.writeSse("log", "No prior memory. Starting fresh.")
+        else: self.writeSse("log", "Memory disabled for this query.")
 
+        ## Step 2: Append the current request and system persona instructions.
         messages.append({"role": "user", "content": query})
-        logStream(f"Sending to proxy (model: {model}, messages: {len(messages)})")
         
+        ## Inject the overarching persona definition to stabilize the model's behavior.
+        system_msg = {
+            "role": "system",
+            "content": "You are Morpheus. The user is Neo. "
+            "You have perfect memory of all previous turns provided in this context. "
+            "Format your responses cleanly in Markdown. "
+            "Do not start your response with a large header."
+        }
+        messages.insert(0, system_msg)
+        self.writeSse("log", f"Sending to proxy (model: {model}, messages: {len(messages)})")
         payload = {
             "model": model,
             "messages": messages,
@@ -168,59 +195,72 @@ class Handler(BaseHTTPRequestHandler):
             "max_tokens": maxTokens,
         }
         
-        reply       = ""
+        reply = ""
         actualModel = "unknown"
-        pTok = cTok = tTok = 0
+        pTok = 0
+        cTok = 0
+        tTok = 0
 
-        # Send the request and process the streaming chunks
+        ## Step 3: Stream data from the proxy, parse it, and pipe it down to the UI.
         try:
+            ## Initiate a connection to the local LiteLLM proxy port.
             resp = req_lib.post(PROXY_URL, headers=PROXY_HEADERS, json=payload, stream=True, timeout=60)
             if resp.status_code != 200:
-                self._writeSse("error", f"Upstream proxy error: {resp.status_code}")
+                self.writeSse("error", f"Upstream proxy error: {resp.status_code}")
                 return
 
+            ## Pluck the absolute model name from the initial headers to bypass the aliasing problem
+            ## (e.g., displaying the real model ID instead of 'fast' or 'smart').
+            actualModel = resp.headers.get("x-litellm-model-name", "unknown")
+            if actualModel != "unknown": self.writeSse("log", f"Model: {actualModel}")
+
+            ## Read the raw byte stream from the proxy line by line.
             for line in resp.iter_lines():
                 if not line: continue
                 lineStr = line.decode("utf-8")
-
                 if not lineStr.startswith("data: "): continue
                 dataStr = lineStr[6:]
                 if dataStr == "[DONE]": break
-
                 data = parseJsonSafe(dataStr)
                 if not data: continue
 
-                if actualModel == "unknown" and "model" in data:
-                    actualModel = data["model"]
-                    logStream(f"Model: {actualModel}")
+                ## Fallback check if headers missed the model name.
+                if "model" in data and isinstance(data["model"], str):
+                    reported_model = data["model"]
+                    if reported_model not in ("auto", "fast", "smart") and actualModel == "unknown":
+                        actualModel = reported_model
+                        self.writeSse("log", f"Model: {actualModel}")
 
+                ## Capture token utilization metrics sent in the final stream chunk.
                 if "usage" in data and data["usage"]:
                     u    = data["usage"]
                     pTok = u.get("prompt_tokens", pTok)
                     cTok = u.get("completion_tokens", cTok)
                     tTok = u.get("total_tokens", tTok)
 
+                ## Extract the delta text fragment and forward it to the browser.
                 choices = data.get("choices", [])
                 if choices:
                     delta = choices[0].get("delta", {})
                     token = delta.get("content", "")
                     if token:
                         reply += token
-                        self._writeSse("token", token)
-
-            # Save to memory after completion
+                        self.writeSse("token", json.dumps(token))
+            
+            ## Post-generation cleanup: save the final conversation back to the memory manager.
             if not noMemory and reply:
                 mem.appendTurn(query, reply)
-                logStream("Turn saved to memory.")
+                self.writeSse("log", "Turn saved to memory.")
 
-            # Fallback token estimation if the API did not provide usage stats
+            ## Calculate estimates if usage stats are missing from the provider API,
+            ## ensuring the UI progress bar still functions roughly.
             if tTok == 0 and reply:
                 cTok = int(len(reply.split()) * 1.3)
                 pTok = int(len(query.split()) * 1.3)
                 tTok = pTok + cTok
 
-            # Signal completion to the frontend with final usage statistics
-            self._writeSse("done", json.dumps({
+            ## Finalize the stream and push statistics as a final 'done' event.
+            self.writeSse("done", json.dumps({
                 "model": actualModel,
                 "promptTokens": pTok,
                 "completionTokens": cTok,
@@ -228,10 +268,13 @@ class Handler(BaseHTTPRequestHandler):
                 "maxTokens": maxTokens,
             }))
 
-        except Exception as e: self._writeSse("error", str(e))
+        except Exception as e:
+            ## Trap any socket errors or parsing failures and log them directly to the UI panel.
+            self.writeSse("error", str(e))
 
-    # Reads a file from disk and sends it directly to the browser
-    def _serveFile(self, path: str, mimeType: str):
+    ## Reads a local file from disk and streams it directly to the HTTP socket.
+    ## Used primarily to serve the static frontend assets (HTML, JS, CSS).
+    def serveFile(self, path: str, mimeType: str):
         if not os.path.exists(path):
             self.send_response(404)
             self.end_headers()

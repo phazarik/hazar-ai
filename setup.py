@@ -2,17 +2,16 @@
 # ---------------------------------------------------------------------------------
 # Purpose: Initializes the local LiteLLM proxy environment across standard
 #          Linux and WSL distributions using Python 3.11+ without systemd.
-# Actions Performed:
-#    1. Verifies the presence of required configuration files.
-#    2. Creates necessary directories for Continue and local binaries.
-#    3. Generates the Continue config and systemd files dynamically with absolute paths.
-#    4. Directly symlinks the environment's LiteLLM binary to ~/.local/bin/litellm.
 # ---------------------------------------------------------------------------------
 
 import os
 import sys
 import shutil
+import stat
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RED, YELLOW = "\033[31m", "\033[33m"
+RESET, BOLD, DIM = "\033[0m", "\033[1m", "\033[2m"
 
 # Verify that all mandatory configuration assets exist before proceeding
 print(">> Checking required files exist...")
@@ -21,19 +20,39 @@ requiredFiles = [
     "core/routerHook.py",
     "core/litellm.env",
     "core/apiKeys.sh",
-    "start.sh"
+    "start.sh",
+    "kill.sh",
+    "query.py",
+    "ui/server.py",
+    "ui/index.html",
+    "ui/style.css",
+    "ui/script.js",
+    "lib/memoryManager.py",
+    "lib/skillLoader.py"
 ]
 
 for f in requiredFiles:
     filePath = os.path.join(BASE_DIR, f)
-    print(f"   -> Checking for file: {filePath}")
-    if not os.path.isfile(filePath):
-        print(f"      [ERROR] Missing {filePath} - stopping setup.")
+    print(f">> Checking for file: {filePath} ... ", end="")
+    if not os.path.exists(filePath):
+        print(f"{RED}[ERROR] Missing {filePath}. Stopping setup.{RESET}")
         sys.exit(1)
-    else:
-        print(f"      [OK] Found {filePath}")
+    else: 
+        print("[OK]")
 
-# Generate the Continue config using absolute paths relative to wherever this is cloned
+# Ensure helper scripts are executable
+print("\n>> Setting executable permissions on scripts...")
+scripts_to_chmod = ["start.sh", "kill.sh", "query.py"]
+for script in scripts_to_chmod:
+    scriptPath = os.path.join(BASE_DIR, script)
+    if os.path.exists(scriptPath):
+        st = os.stat(scriptPath)
+        os.chmod(scriptPath, st.st_mode | stat.S_IEXEC)
+        print(f"  - Made {script} executable.")
+
+## --------------------------------------------------------------------------------------
+## Generate the Continue config using absolute paths relative to wherever this is cloned
+## --------------------------------------------------------------------------------------
 print("\n>> Generating dynamic Continue configuration...")
 continueConfigContent = (
     "# ------------------------------------------------------------\n"
@@ -49,17 +68,20 @@ continueConfigContent = (
 )
 continueDir = os.path.expanduser("~/.continue")
 if not os.path.exists(continueDir):
-    print(f"   -> Directory does not exist. Creating directory: {continueDir}")
+    print(f"{DIM}>> Directory does not exist. Creating directory: {continueDir}{RESET}")
     os.makedirs(continueDir)
-else:
-    print(f"   -> Directory already exists: {continueDir}")
+else: 
+    print(f"{DIM}>> Directory already exists: {continueDir}{RESET}")
 
 continueDest = os.path.join(continueDir, "config.yaml")
-print(f"   -> Creating/Overwriting Continue config file at: {continueDest}")
-with open(continueDest, "w") as f: f.write(continueConfigContent)
-print(f"      [OK] Wrote Continue configuration to {continueDest}")
+print(f">> Creating/Overwriting Continue config file at: {continueDest}")
+with open(continueDest, "w") as f: 
+    f.write(continueConfigContent)
+print(f"{YELLOW}>> Wrote Continue configuration to {continueDest}{RESET}")
 
-# Generate the systemd service using absolute paths
+## --------------------------------------------------
+## Generate the systemd service using absolute paths
+## --------------------------------------------------
 print("\n>> Generating systemd service file with dynamic paths...")
 serviceContent = (
     "# Runs the litellm proxy as a background service inside WSL.\n"
@@ -75,48 +97,51 @@ serviceContent = (
     "[Install]\n"
     "WantedBy=default.target\n"
 )
-
 systemdDir = os.path.expanduser("~/.config/systemd/user")
 if not os.path.exists(systemdDir):
-    print(f"   -> Directory does not exist. Creating directory: {systemdDir}")
+    print(f"{DIM}>> Directory does not exist. Creating directory: {systemdDir}{RESET}")
     os.makedirs(systemdDir)
-else:
-    print(f"   -> Directory already exists: {systemdDir}")
+else: 
+    print(f"{DIM}>> Directory already exists: {systemdDir}{RESET}")
 
-print(f"   -> Creating/Overwriting systemd service file at: {os.path.join(systemdDir, 'litellm.service')}")
-with open(os.path.join(systemdDir, "litellm.service"), "w") as f: f.write(serviceContent)
-print(f"      [OK] Wrote systemd service file to {os.path.join(systemdDir, 'litellm.service')}")
+print(f">> Creating/Overwriting systemd service file at: {os.path.join(systemdDir, 'litellm.service')}")
+with open(os.path.join(systemdDir, "litellm.service"), "w") as f: 
+    f.write(serviceContent)
+print(f"{YELLOW}>> Wrote systemd service file to {os.path.join(systemdDir, 'litellm.service')}{RESET}")
 
-# Locate the actual LiteLLM executable within the active Python environment
+## --------------------------------------------------------------------------
+## Locate the actual LiteLLM executable within the active Python environment
+## --------------------------------------------------------------------------
 print("\n>> Symlinking litellm from active environment...")
 condaBin = os.path.join(os.path.dirname(sys.executable), "litellm")
-print(f"   -> Searching for litellm binary at primary path: {condaBin}")
+print(f">> Searching for litellm binary at primary path: {condaBin}")
 if not os.path.isfile(condaBin):
-    print("   -> Primary path not found. Falling back to shutil.which('litellm')")
+    print(">> Primary path not found. Falling back to shutil.which('litellm')")
     condaBin = shutil.which("litellm")
-
 if not condaBin or not os.path.isfile(condaBin):
-    print("[ERROR] litellm binary not found in active environment.")
+    print(f"{RED}[ERROR] litellm binary not found in active environment.{RESET}")
     sys.exit(1)
-print(f"   -> Successfully located litellm binary at: {condaBin}")
+print(f"{YELLOW}>> Successfully located litellm binary at: {condaBin}{RESET}")
 
-# Ensure local binary directory exists and symlink the binary for global CLI access
+## ----------------------------------------------------------------------------------
+## Ensure local binary directory exists and symlink the binary for global CLI access
+## ----------------------------------------------------------------------------------
 localBin = os.path.expanduser("~/.local/bin")
 if not os.path.exists(localBin):
-    print(f"   -> Directory does not exist. Creating local bin directory: {localBin}")
+    print(f"{DIM}>> Directory does not exist. Creating local bin directory: {localBin}{RESET}")
     os.makedirs(localBin)
-else:
-    print(f"   -> Local bin directory already exists: {localBin}")
+else: 
+    print(f"{DIM}>> Local bin directory already exists: {localBin}{RESET}")
 
 localLitellm = os.path.join(localBin, "litellm")
 if os.path.lexists(localLitellm):
-    print(f"   -> Found existing file/symlink at target destination. Removing: {localLitellm}")
+    print(f">> Found existing file/symlink at target destination. Removing: {localLitellm}")
     os.remove(localLitellm)
 
-print(f"   -> Creating symlink for global CLI access:")
-print(f"      Source (Target): {condaBin}")
-print(f"      Destination (Link name): {localLitellm}")
+print(f">> Creating symlink for global CLI access:")
+print(f">> Source (Target): {condaBin}")
+print(f">> Destination (Link name): {localLitellm}")
 os.symlink(condaBin, localLitellm)
-print(f"      [OK] Symlink successfully created at {localLitellm}")
+print(f"{YELLOW}>> Symlink successfully created at {localLitellm}{RESET}")
 
 print("\n>> Setup complete. Run systemctl --user daemon-reload if using systemd.")

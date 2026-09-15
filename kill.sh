@@ -1,25 +1,37 @@
 #!/usr/bin/env bash
 # -------------------------------------------------------------------------
-# Stops the background LiteLLM proxy running on port 4000.
+# Stops all background PrachuGPT services (Proxy, UI, and Local Model).
 # -------------------------------------------------------------------------
 
-PORT=4000
-echo ">> Searching for LiteLLM proxy on port $PORT..."
+echo ">> Stopping Prachu-GPT services..."
 
-# Find PID using standard pgrep looking for our specific config
-PID=$(pgrep -f "litellm.*core/config.yaml")
-
-if [ -n "$PID" ]; then
-  echo ">> Stopping LiteLLM proxy (PID $PID on port $PORT)..."
-  kill "$PID"
-  sleep 1
+## Helper function to gracefully kill a process by pattern
+kill_service() {
+  local pattern=$1
+  local name=$2
   
-  if kill -0 "$PID" 2>/dev/null; then
-    echo ">> Process did not exit gracefully, forcing termination..."
-    kill -9 "$PID"
+  ## Find PID using standard pgrep
+  local pids=$(pgrep -f "$pattern")
+  
+  if [ -n "$pids" ]; then
+    echo ">> Stopping $name (PID $pids)..."
+    kill $pids 2>/dev/null
+    sleep 1
+    
+    ## Force kill if still running
+    for pid in $pids; do
+      if kill -0 "$pid" 2>/dev/null; then
+        echo ">> $name did not exit gracefully, forcing termination..."
+        kill -9 "$pid" 2>/dev/null
+      fi
+    done
+  else
+    echo ">> $name is not running."
   fi
-  echo ">> LiteLLM stopped."
-else
-  echo ">> No process found on port $PORT. Falling back to pkill..."
-  pkill -f "litellm.*config.yaml" && echo ">> LiteLLM processes terminated." || echo ">> No running LiteLLM process found."
-fi
+}
+
+kill_service "litellm.*core/config.yaml" "LiteLLM Proxy"
+kill_service "python3 ui/server.py" "Web UI"
+kill_service "llama_cpp.server" "Local Model Server"
+
+echo ">> Cleanup complete."

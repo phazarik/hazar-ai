@@ -11,14 +11,13 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 ## Default cleanup: Editor backups and ROOT ACLiC compilation artifacts
 junk = [
     "**/*~",
-    "*.log",
+    "**/*.log",
     "**/__pycache__"
 ]
 ## --all cleanup: Output ROOT files and text summaries
 if args.all:
     junk += [
-        "memory"
-        "models"
+        "memory/"
     ]
 
 for f in junk:
