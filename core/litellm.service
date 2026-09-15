@@ -1,0 +1,31 @@
+# -----------------------------------------------------------------------
+# Runs the litellm proxy as a background service inside WSL.
+# The real file lives here in ~/.ai-setup/; systemd only finds it
+# because of a symlink at ~/.config/systemd/user/litellm.service
+# pointing back to this file (systemd insists on that exact
+# folder, so the symlink is the workaround).
+#
+# Restarts itself if it ever crashes. API keys are read natively 
+# from ~/.ai-setup/litellm.env. This means the service works 
+# completely independently and is ready immediately after a WSL boot, 
+# even before opening the first terminal.
+#
+# After editing this file: systemctl --user daemon-reload
+# To turn it on:           systemctl --user enable --now litellm.service
+# To check on it:          systemctl --user status litellm.service
+# To read its logs:        journalctl --user -u litellm.service -f
+# -----------------------------------------------------------------------
+
+[Unit]
+Description=LiteLLM proxy
+After=network.target
+
+[Service]
+WorkingDirectory=%h/.ai-setup
+Environment=PYTHONPATH=%h/.ai-setup
+EnvironmentFile=%h/.ai-setup/core/litellm.env
+ExecStart=%h/.local/bin/litellm --config %h/.ai-setup/core/config.yaml --port 4000
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

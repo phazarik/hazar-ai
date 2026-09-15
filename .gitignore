@@ -1,0 +1,23 @@
+# --- CRITICAL ---
+core/litellm.env
+
+# --- OS & editor ---
+.vscode/
+**/*~
+**/*#
+
+# --- logs ---
+core/litellm.log
+*.log
+memory/
+
+# --- Heavy model files ---
+model/*.gguf
+model/*.bin
+model/*.pt
+model/*.safetensors
+
+# --- Python cache ---
+**/__pycache__/
+*.py[cod]
+*$py.class

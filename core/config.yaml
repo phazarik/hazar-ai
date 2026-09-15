@@ -1,0 +1,113 @@
+# -------------------------------------------------------------------
+# Main setup file for the local LiteLLM proxy. This is what
+# turns a bunch of different free API keys (OpenRouter, Gemini,
+# Groq) into one single endpoint at localhost:4000 that looks
+# like a normal OpenAI API.
+#
+# Three groups of models are defined below:
+#    - "auto"  -> what every tool should actually call. Gets
+#                 rewritten to "fast" or "smart" by router_hook.py
+#                 before the real request goes out.
+#    - "fast"  -> small/cheap free models, tried in order
+#    - "smart" -> bigger free models for harder tasks, tried in order
+#    - "local" -> runs native .gguf models from the local model/ dir
+#
+# If one model in a group hits a rate limit, the proxy skips it
+# for a day and moves to the next one in that group automatically.
+# If every "smart" model is used up, requests drop down to "fast"
+# instead of just failing.
+# -------------------------------------------------------------------
+
+model_list:
+  # placeholder entry for "auto" - this only matters if router_hook.py
+  # somehow fails to run at all, since normally the hook rewrites the
+  # model name before this entry would ever get used
+  - model_name: auto
+    litellm_params:
+      model: gemini/gemini-3.5-flash-lite
+      api_key: os.environ/GEMINI_API_KEY
+
+  # Fast group: everyday stuff, tried top to bottom
+  - model_name: fast
+    litellm_params:
+      model: gemini/gemini-3.5-flash-lite
+      api_key: os.environ/GEMINI_API_KEY
+  - model_name: fast
+    litellm_params:
+      model: groq/qwen/qwen3.6-27b
+      api_key: os.environ/GROQ_API_KEY
+  - model_name: fast
+    litellm_params:
+      model: openrouter/google/gemma-4-31b-it:free
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: fast
+    litellm_params:
+      model: openrouter/inclusionai/ling-3.0-flash-vl:free
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: fast
+    litellm_params:
+      model: openrouter/liquid/lfm-2.5-2.6b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: fast
+    litellm_params:
+      model: openrouter/thinkingmachines/inkling-small:free
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: fast
+    litellm_params:
+      model: openrouter/qwen/qwen-2.5-coder-32b-instruct
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  # Smart group: harder reasoning / planning work
+  - model_name: smart
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GEMINI_API_KEY
+  - model_name: smart
+    litellm_params:
+      model: gemini/gemini-pro-latest
+      api_key: os.environ/GEMINI_API_KEY
+  - model_name: smart
+    litellm_params:
+      model: groq/openai/gpt-oss-120b
+      api_key: os.environ/GROQ_API_KEY
+  - model_name: smart
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3.5-lightning:free
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: smart
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: smart
+    litellm_params:
+      model: openrouter/thinkingmachines/inkling:free
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: smart
+    litellm_params:
+      model: openrouter/deepseek/deepseek-r1
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  # Local group: Native inference running out of the model/ directory
+  - model_name: local
+    litellm_params:
+      model: openai/local
+      api_base: http://localhost:8000/v1
+      api_key: sk-local
+
+# settings for how the proxy behaves when a model in a group fails
+router_settings:
+  routing_strategy: simple-shuffle    # try models in order, shuffle equal options
+  num_retries: 2                      # retry a failed request up to 2 times
+  allowed_fails: 2                    # max errors allowed before putting a model on cooldown
+  cooldown_time: 86400                # pause failed models for 24 hours (matches daily free limits)
+
+litellm_settings:
+  # loads the routing script that automatically switches "auto" to "fast" or "smart"
+  callbacks: ["routerHook.router_hook_instance"]
+
+  # if all models in one group fail, drop down to the other group
+  fallbacks: [{"fast": ["smart"]}, {"smart": ["fast"]}]
+
+# authenticates requests sent to the local proxy using your environment's master key
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
