@@ -55,7 +55,7 @@ def main():
     ## The file contents are merged into a single context string.
     fileContexts = {}
     contextText  = ""
-    if args.file: fileContexts, contextText = prepareFileContext(args.file, args.no_memory)
+    if args.file: fileContexts, contextText = prepareFileContext(args.file, args.no_memory, args.optimize_tokens)
     else: print(">> No context files attached.")
 
     ## Append the loaded file contents to the actual prompt.
@@ -86,6 +86,7 @@ def parseArguments() -> argparse.Namespace:
     parser.add_argument("--clear-memory",   action="store_true")
     parser.add_argument("--memory-status",  action="store_true")
     parser.add_argument("--list-skills",    action="store_true")
+    parser.add_argument("--optimize-tokens", action="store_true", help="Strip empty lines from files to save context")
     return parser.parse_args()
 
 ## Handles quick commands that just print info or manage memory, then exit.
@@ -123,7 +124,7 @@ def handleUtilityCommands(args: argparse.Namespace) -> bool:
 
 ## Reads local files, saves them to the file cache, and formats them for the prompt.
 ## Returns a dictionary tracking file metadata and a concatenated string of their contents.
-def prepareFileContext(filepaths: list, no_memory: bool) -> tuple[dict, str]:
+def prepareFileContext(filepaths: list, no_memory: bool, optimize: bool) -> tuple[dict, str]:
     fileContexts = {}
     contextText  = ""
     
@@ -142,7 +143,8 @@ def prepareFileContext(filepaths: list, no_memory: bool) -> tuple[dict, str]:
         
         ## Append the file contents into a clearly separated format for the LLM.
         ## optimizeTokens strips empty lines to save context window space.
-        contextText += f"\n\n--- FILE: {filepath} ---\n{optimizeTokens(raw)}\n--- END ---\n"
+        content_to_use = optimizeTokens(raw) if optimize else raw
+        contextText += f"\n\n--- FILE: {filepath} ---\n{content_to_use}\n--- END ---\n"
         fileContexts[sha] = {"path": filepath, "content": raw}
         
     return fileContexts, contextText
@@ -176,6 +178,30 @@ def buildMessages(finalQuery: str, skill: str, no_memory: bool) -> list:
     ## Finally, attach the active user prompt at the very end of the list.
     messages.append({"role": "user", "content": finalQuery})
     return messages
+
+## Retrieves the true context limit size from the local LiteLLM proxy
+def getContextLimit(model_name: str) -> int:
+    limit = 8192
+    try:
+        resp = requests.get("http://127.0.0.1:4000/model/info", headers=PROXY_HEADERS, timeout=2)
+        if resp.status_code == 200:
+            models = resp.json().get("data", [])
+            for m in models:
+                if m.get("model_name") == model_name or m.get("id") == model_name:
+                    info = m.get("model_info", {})
+                    found = info.get("max_input_tokens") or m.get("max_input_tokens") or info.get("max_tokens")
+                    if found: 
+                        limit = int(found)
+                    break
+    except Exception: 
+        pass
+        
+    if limit == 8192:
+        lower_name = model_name.lower()
+        if "gemini" in lower_name: limit = 1048576
+        elif "deepseek-r1" in lower_name: limit = 128000
+        elif "qwen" in lower_name: limit = 32768
+    return limit
 
 ## Connects to the LLM API, parses the streaming text chunks, and updates the console UI.
 ## This function handles the network connection, renders the Markdown via the Rich library,
@@ -264,8 +290,9 @@ def streamResponse(args: argparse.Namespace, messages: list, finalQuery: str, fi
             pTok = int(len(finalQuery.split()) * 1.3)
             tTok = pTok + cTok
             
-        ## Display the final usage metrics to the terminal.
-        print(f"\n{formatUsage(pTok, cTok, tTok, args.max_tokens)}\n")
+        ## Display the final usage metrics to the terminal against the context limit
+        context_limit = getContextLimit(actualModel)
+        print(f"\n{formatUsage(pTok, cTok, tTok, context_limit)}\n")
 
     except KeyboardInterrupt: 
         print(f"\n{YELLOW}>> Stopped.{RESET}")
@@ -294,13 +321,13 @@ def buildPanel(text: str, title: str) -> Panel:
     return Panel(Markdown(text, code_theme="bw"), title=title, border_style="green", width=110)
 
 ## Calculates and formats an ASCII progress bar showing how many tokens were used.
-def formatUsage(pTok: int, cTok: int, tTok: int, maxTok: int) -> str:
-    pct    = (cTok / maxTok * 100) if maxTok > 0 else 0
-    filled = min(100, int(100 * cTok / maxTok)) if maxTok > 0 else 0
+def formatUsage(pTok: int, cTok: int, tTok: int, contextLimit: int) -> str:
+    pct    = (tTok / contextLimit * 100) if contextLimit > 0 else 0
+    filled = min(100, int(100 * tTok / contextLimit)) if contextLimit > 0 else 0
     bar    = "█" * filled + "░" * (100 - filled)
     return (
         f"Tokens — prompt: {pTok} + completion: {cTok} = total: {tTok}\n"
-        f"{bar} {YELLOW}{BOLD}{pct:.1f}%{RESET} of {maxTok}"
+        f"{bar} {YELLOW}{BOLD}{pct:.1f}%{RESET} of {contextLimit} (Context Limit)"
     )
 
 ## Safely tries to parse a JSON string, returning an empty dictionary on failure

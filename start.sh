@@ -6,7 +6,7 @@
 
 cd "$(dirname "$0")" || exit 1
 COMMAND=${1:-all}
-
+YELLOW='\033[33m'
 BOLD_YELLOW='\033[1;33m'
 RESET='\033[0m'
 
@@ -153,10 +153,18 @@ if [[ "$COMMAND" == "all" || "$COMMAND" == "fresh" || "$COMMAND" == "offline" ]]
     echo ""
     echo -e ">> Web UI is live at: ${BOLD_YELLOW}http://localhost:5000${RESET}"
     echo ">> CLI Usage Examples:"
-    echo "   python3 query.py --query \"Write a script to parse JSON.\""
-    echo "   python3 query.py --model fast --query \"Quick question...\""
+    echo -e "   ${YELLOW}python3 query.py --query \"Write a script to parse JSON.\"${RESET}"
+    echo -e "   ${YELLOW}python3 query.py --model fast --query \"Quick question...\"${RESET}"
+    echo -e "   ${YELLOW}python3 query.py --query \"Long output\" --max-tokens 2000${RESET}"
+    echo -e "   ${YELLOW}python3 query.py --query \"Analyze this\" --file app.py config.json --optimize-tokens${RESET}"
+    echo -e "   ${YELLOW}python3 query.py --query \"With skill\" --skill prompt-master${RESET}"
+    echo -e "   ${YELLOW}python3 query.py --query \"One-off question\" --no-memory${RESET}"
+    echo -e "   ${YELLOW}python3 query.py --memory-status${RESET}"
+    echo -e "   ${YELLOW}python3 query.py --clear-memory${RESET}"
+    echo -e "   ${YELLOW}python3 query.py --list-skills${RESET}"
+    echo -e "   ${YELLOW}python3 query.py --skill-inspect prompt-master${RESET}"
     if [[ "$COMMAND" == "offline" ]]; then
-        echo "   python3 query.py --model local --query \"Fully offline query...\""
+        echo -e "   ${YELLOW}python3 query.py --model local --query \"Fully offline query...\"${RESET}"
     fi
     echo ""
     echo ">> All services initiated. Tailing proxy logs (Press Ctrl+C to exit log view)..."
