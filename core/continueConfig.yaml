@@ -15,4 +15,3 @@ models:
     model: auto              ## let router_hook.py decide fast vs smart
     apiBase: http://localhost:4000
     apiKey: sk-anything      ## only needs to match LITELLM_MASTER_KEY for real if that's set
-

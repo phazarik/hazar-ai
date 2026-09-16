@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # -------------------------------------------------------------------------
-# Stops all background PrachuGPT services (Proxy, UI, and Local Model).
+# Stops all background hazar-ai services (Proxy, UI, and Local Model(s)).
 # -------------------------------------------------------------------------
 
-echo ">> Stopping Prachu-GPT services..."
+echo ">> Stopping hazar-ai services..."
 
 ## Helper function to gracefully kill a process by pattern
 kill_service() {
@@ -30,7 +30,7 @@ kill_service() {
   fi
 }
 
-kill_service "litellm.*core/config.yaml" "LiteLLM Proxy"
+kill_service "litellm --config" "LiteLLM Proxy"
 kill_service "python3 ui/server.py" "Web UI"
 kill_service "llama_cpp.server" "Local Model Server"
 

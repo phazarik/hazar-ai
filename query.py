@@ -168,7 +168,7 @@ def buildMessages(finalQuery: str, skill: str, no_memory: bool) -> list:
         history, _ = mem.loadMemory()
         if history:
             turns = sum(1 for m in history if m["role"] == "user")
-            print(f">> Loaded {turns} turn(s) from memory.")
+            print(f">> Loaded {turns} chat(s) from memory.")
             messages.extend(history)
         else: print(">> No prior memory. Starting fresh.")
     else: print(">> Memory disabled (--no-memory).")
@@ -255,7 +255,7 @@ def streamResponse(args: argparse.Namespace, messages: list, finalQuery: str, fi
         ## Post-processing: save the interaction to persistent memory.
         if not args.no_memory and reply:
             mem.appendTurn(finalQuery, reply, fileContexts if fileContexts else None)
-            print("\n>> Turn saved to memory.")
+            print("\n>> Chat saved to memory.")
             
         ## If the API provider did not supply exact token usage, estimate it based
         ## on word counts to populate the progress bar anyway.
@@ -283,7 +283,7 @@ def optimizeTokens(content: str) -> str:
 
 ## Prints the stylish ASCII art title using a compact block font to prevent wrapping.
 def displayLogo(console: Console):
-    ascii_art = pyfiglet.figlet_format("Prachu-GPT", font="slant")
+    ascii_art = pyfiglet.figlet_format("hazar-ai", font="slant")
     console.print(Text(ascii_art, style="bold green"), no_wrap=True)
     
 ## Wraps the streaming text inside a bordered box.

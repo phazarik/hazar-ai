@@ -109,9 +109,11 @@ The main services use fixed local ports:
 
 Start the proxy and associated services with:
 ```bash
-bash start.sh        # or,
-bash start.sh fresh  # start with a completely new conversation history
+bash start.sh          # or,
+bash start.sh fresh    # start with a completely new conversation history
+bash start.sh offline  # local .gguf models only — no cloud API calls
 ```
+`start.sh` always kills any previously running proxy/UI/local-model processes first, so it's safe to re-run at any time.
 ### Command-line interface
 
 The CLI sends requests through the local LiteLLM proxy. Some example usage are listed below.
@@ -147,15 +149,21 @@ bash kill.sh
 ## Customization
 
 ### Local models
-This setup can run local `.gguf` models using `llama.cpp`. Place a `.gguf` model in:
+This setup can run local `.gguf` models using `llama.cpp`. Place one or more `.gguf` models in:
 ```text
-model/
+models/
 ```
-Then start the local server:
+Then start the local server(s):
 ```bash
 bash start.sh local
 ```
-The local server listens on port `8000`. The `local` model alias is configured in `core/config.yaml`, allowing the model to be selected from both the CLI and Web UI.
+`start.sh` scans `models/` for every `.gguf` file and starts one `llama.cpp` server per model, on sequential ports starting at `8000`. It also regenerates `core/config.local.generated.yaml`, registering each model under a `local:<filename-without-extension>` alias; the first model found is additionally kept under the plain `local` alias so existing `--model local` usage keeps working.
+
+If you only have — or only want to use — local models (e.g. fully offline, no API keys needed), run:
+```bash
+bash start.sh offline
+```
+This starts only the local model server(s) and points the LiteLLM proxy at `core/config.local.generated.yaml`, so cloud providers are never contacted. Use `--model local` (or `--model local:<name>` for a specific model) from the CLI or Web UI.
 
 ### Skills
 A skill is a directory containing instructions that can be injected into a conversation to give the model specialized behavior or knowledge. Skills are stored under:

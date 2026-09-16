@@ -59,7 +59,7 @@ header {
     background-color: var(--surface);
 }
 
-.logo-upload-wrapper {
+.logo-wrapper {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -78,13 +78,26 @@ header {
 }
 
 #logoImg {
-    max-height: 30px;
+    max-height: 45px;
 }
 
 .header-title {
-    margin-left: auto;
+    /*margin-left: auto;*/
     font-weight: bold;
     font-size: 16px;
+}
+
+.header-profile {
+    margin-left: auto; /* This pushes it to the far right */
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: bold;
+    font-size: 14px;
+    transition: color 0.2s ease;
+}
+
+.header-profile:hover {
+    color: var(--text);
 }
 
 .main-layout {
@@ -108,6 +121,47 @@ header {
     flex: 1;
     overflow-y: auto;
     padding: 20px;
+    min-height: 120px;
+}
+
+/* Drag handle between the chat history and the footer. Only the chat-col's
+   height changes when dragging; the footer/buttons keep their own size. */
+.chat-resize-handle {
+    height: 6px;
+    flex: 0 0 auto;
+    cursor: ns-resize;
+    background-color: var(--surface);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    position: relative;
+}
+
+.chat-resize-handle::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 40px;
+    height: 2px;
+    background-color: var(--muted);
+}
+
+.chat-resize-handle:hover,
+body.resizing-chat .chat-resize-handle {
+    background-color: var(--border);
+}
+
+/* Prevent text selection glitches while dragging the resize handle */
+body.resizing-chat {
+    user-select: none;
+    cursor: ns-resize;
+}
+
+/* Visual feedback while a file is being dragged over the app window */
+.app.drag-active {
+    outline: 2px dashed var(--accent);
+    outline-offset: -4px;
 }
 
 .msg {
@@ -131,7 +185,7 @@ header {
 
 /* NEO Styling*/
 .msg.neo .role-name {
-    color: #cccccc; /* Light gray for NEO */
+    color: #ffffff;
 }
 
 .msg.neo .msg-content {
@@ -207,6 +261,7 @@ footer {
     display: flex;
     gap: 12px;
     margin-top: 8px;
+    align-items: flex-start; /* This stops the buttons from stretching */
 }
 
 textarea {
@@ -217,7 +272,8 @@ textarea {
     padding: 10px;
     font-family: var(--font);
     resize: none;
-    height: 50px;
+    height: 80px;
+    overflow-y: hidden;
 }
 
 button {
@@ -242,6 +298,30 @@ button:hover {
     font-size: 12px;
     color: var(--muted);
     margin-bottom: 5px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.file-chip {
+    display: inline-flex;
+    align-items: center;
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: var(--radius);
+}
+
+.file-chip-remove {
+    color: var(--muted);
+    margin-left: 6px;
+    text-decoration: none;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.file-chip-remove:hover {
+    color: var(--accent);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -350,8 +430,8 @@ button:hover {
 }
 
 .tool-btn:hover {
-    color: var(--text);
-    border-color: var(--muted);
+    color: var(--bg); /* Flips the text/icon to the dark background color */
+    border-color: var(--accent); /* Matches the bright green fill */
 }
 
 .tool-btn.active {

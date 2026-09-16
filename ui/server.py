@@ -38,7 +38,7 @@ PORT          = 5000
 ## Initializes the HTTP server on port 5000, listening to all local interfaces.
 def runServer():
     server = HTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"PrachuGPT Web UI running at http://localhost:{PORT}")
+    print(f"hazar-ai Web UI running at http://localhost:{PORT}")
     print("Press Ctrl+C to stop.")
     try: server.serve_forever()
     except KeyboardInterrupt: print("\nStopped.")
@@ -104,7 +104,7 @@ class Handler(BaseHTTPRequestHandler):
 
     ## Routes incoming GET requests based on the URL path.
     ## Acts as a simple static file server for the UI elements, or responds with JSON
-    # for API read endpoints.
+    ## for API read endpoints.
     def do_GET(self):
         path = urlparse(self.path).path
         if path in ("/", "/index.html"): self.serveFile(os.path.join(UI_DIR, "index.html"), "text/html")
@@ -112,6 +112,13 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/script.js":       self.serveFile(os.path.join(UI_DIR, "script.js"), "application/javascript")
         elif path == "/api/skills":      self.sendJson({"skills": skills.listSkills()})
         elif path == "/api/status":      self.sendJson(mem.memoryStatus())
+        elif path == "/.image/logo.png": self.serveFile(os.path.join(BASE_DIR, ".image", "logo.png"), "image/png")
+
+        ## Restore history on refresh
+        elif path == "/api/history":
+            history, _ = mem.loadMemory() 
+            self.sendJson({"history": history})
+
         else:
             self.send_response(404)
             self.end_headers()
@@ -133,6 +140,31 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def getContextLimit(self, model_name: str) -> int:
+        ## Attempts to fetch the true context window size from the LiteLLM proxy.
+        limit = 8192
+        try:
+            resp = req_lib.get("http://127.0.0.1:4000/model/info", headers=PROXY_HEADERS, timeout=2)
+            if resp.status_code == 200:
+                models = resp.json().get("data", [])
+                for m in models:
+                    if m.get("model_name") == model_name or m.get("id") == model_name:
+                        info = m.get("model_info", {})
+                        ## LiteLLM stores limits under different keys depending on the provider
+                        found = info.get("max_input_tokens") or m.get("max_input_tokens") or info.get("max_tokens")
+                        if found: limit = int(found)
+                        break
+        except Exception: pass
+            
+        # Fallback heuristics if the proxy is missing the exact data
+        if limit == 8192:
+            lower_name = model_name.lower()
+            if "gemini" in lower_name: limit = 1048576
+            elif "deepseek-r1" in lower_name: limit = 128000
+            elif "qwen" in lower_name: limit = 32768
+            
+        return limit
+
     # --------------------------------------------------------------------------
     # Core Proxy Passthrough Logic
     # --------------------------------------------------------------------------
@@ -144,6 +176,7 @@ class Handler(BaseHTTPRequestHandler):
 
         ## Extract options defined by the web UI request payload.
         query     = body.get("query", "").strip()
+        files     = body.get("files", []) or []
         model     = body.get("model", "auto")
         skillName = body.get("skill", "").strip() or None
         noMemory  = body.get("noMemory", False)
@@ -152,6 +185,22 @@ class Handler(BaseHTTPRequestHandler):
         if not query:
             self.writeSse("error", "Empty query.")
             return
+
+        ## Step 0: Process any attached files the same way the CLI does —
+        ## hash each one, note whether it's already cached in memory, and
+        ## append its contents to the prompt in a clearly delimited block.
+        fileContexts = {}
+        if files:
+            contextText = ""
+            for f in files:
+                name = f.get("name", "unnamed")
+                content = f.get("content", "")
+                sha, cached = mem.registerFile(name, content)
+                label = "(cached) " if (cached and not noMemory) else "+ "
+                self.writeSse("log", f"{label}{name}")
+                contextText += f"\n\n--- FILE: {name} ---\n{content}\n--- END ---\n"
+                fileContexts[sha] = {"path": name, "content": content}
+            query += f"\n\nContext files:\n{contextText}"
 
         ## Step 1: Build context.
         ## Load custom skills and previous conversation memory.
@@ -169,7 +218,7 @@ class Handler(BaseHTTPRequestHandler):
             history, _ = mem.loadMemory()
             if history:
                 turns = sum(1 for m in history if m["role"] == "user")
-                self.writeSse("log", f"Loaded {turns} turn(s) from memory.")
+                self.writeSse("log", f"Loaded {turns} chat(s) from memory.")
                 messages.extend(history)
             else: self.writeSse("log", "No prior memory. Starting fresh.")
         else: self.writeSse("log", "Memory disabled for this query.")
@@ -249,8 +298,8 @@ class Handler(BaseHTTPRequestHandler):
             
             ## Post-generation cleanup: save the final conversation back to the memory manager.
             if not noMemory and reply:
-                mem.appendTurn(query, reply)
-                self.writeSse("log", "Turn saved to memory.")
+                mem.appendTurn(query, reply, fileContexts if fileContexts else None)
+                self.writeSse("log", "Chat saved to memory.")
 
             ## Calculate estimates if usage stats are missing from the provider API,
             ## ensuring the UI progress bar still functions roughly.
@@ -259,13 +308,16 @@ class Handler(BaseHTTPRequestHandler):
                 pTok = int(len(query.split()) * 1.3)
                 tTok = pTok + cTok
 
+            ## Fetch the true context limit from the LiteLLM proxy
+            context_limit = self.getContextLimit(actualModel)
+
             ## Finalize the stream and push statistics as a final 'done' event.
             self.writeSse("done", json.dumps({
                 "model": actualModel,
                 "promptTokens": pTok,
                 "completionTokens": cTok,
                 "totalTokens": tTok,
-                "maxTokens": maxTokens,
+                "contextLimit": context_limit
             }))
 
         except Exception as e:

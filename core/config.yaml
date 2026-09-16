@@ -10,7 +10,14 @@
 #                 before the real request goes out.
 #    - "fast"  -> small/cheap free models, tried in order
 #    - "smart" -> bigger free models for harder tasks, tried in order
-#    - "local" -> runs native .gguf models from the local model/ dir
+#    - "local" -> runs native .gguf models from the local models/ dir.
+#                 If several .gguf files are placed there, start.sh spins
+#                 up one llama.cpp server per model and regenerates
+#                 core/config.local.generated.yaml with a "local:<name>"
+#                 alias for each one (the first model is also kept under
+#                 the plain "local" alias for backward compatibility).
+#                 Run `bash start.sh offline` to use only local models,
+#                 with no cloud API calls at all.
 #
 # If one model in a group hits a rate limit, the proxy skips it
 # for a day and moves to the next one in that group automatically.
