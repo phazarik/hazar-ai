@@ -12,7 +12,8 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 junk = [
     "**/*~",
     "**/*.log",
-    "**/__pycache__"
+    "**/__pycache__",
+    "codebase.md"
 ]
 ## --all cleanup: Output ROOT files and text summaries
 if args.all:

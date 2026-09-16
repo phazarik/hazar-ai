@@ -1,85 +1,26 @@
-# Prachu-GPT: LLM Workspace
+# Hazar-AI: optimize free LLM usage
 
-A local workspace designed to run, route, and interact with large language models. It acts as a smart proxy that forwards requests to the fastest or most capable free models available, compresses memory locally to save tokens, and supports running native `.gguf` files.
+![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg) ![Proxy](https://img.shields.io/badge/proxy-LiteLLM-orange.svg) ![Local Models](https://img.shields.io/badge/inference-llama.cpp-yellow.svg) ![UI](https://img.shields.io/badge/interface-CLI%20%7C%20Web-green.svg)
 
-## Setting up
+Running top-tier models gets expensive fast, and free tiers constantly hit rate limits. Hazar-ai fixes that without paid subscriptions. This setup lets queries run through _hazars_ of tokens across free models without hitting a wall.
 
-First, pull the repository and a sample skill set to the local machine.
-```bash
-git clone git@github.com:phazarik/prachu-gpt.git
-mkdir -p ~/.claude/skills
-git clone [https://github.com/nidhinjs/prompt-master.git](https://github.com/nidhinjs/prompt-master.git) ~/.claude/skills/prompt-master
-```
-Install LiteLLM and the necessary network dependencies inside a conda environment using **Python 3.11 or higher**.
-```bash
-conda create -n llm python=3.11 -y
-conda activate llm
-pip install "litellm[proxy]" "llama-cpp-python[server]" websockets requests rich pyfiglet tqdm 
-```
-Gather API keys from standard LLM providers (e.g., OpenRouter, Google AI Studio, GroqCloud, Tavily). Write these API keys to the environment file located at `core/litellm.env`.
-```
-OPENROUTER_API_KEY=sk-or-v1-XXXXXXXXXXXX
-GEMINI_API_KEY=AQ.XXXXXXXXXXXX
-GROQ_API_KEY=gsk_XXXXXXXXXXXX
-TAVILY_API_KEY=tvly-dev-XXXXXXXXXXXX
-```
-Run the included helper script to discover which models the provided keys unlock.
-```bash
-python3 findModels.py
-```
-Update the `model_list` section in `core/config.yaml` with the preferred models from the script output. The proxy organizes models into two primary tiers: `fast` (for everyday, lightweight tasks) and `smart` (for complex reasoning). Finally, execute the setup script to link configurations and binaries automatically.
-```bash
-python3 setup.py
-```
+Instead of manually juggling API keys, copying prompts across browser tabs, or losing chat history when a model fails, this tool provides a single local proxy that can:
+- Route requests between fast and smart model groups;
+- Automatically switch between providers when a deployment fails or hits a rate limit;
+- Compress older conversation history to preserve context;
+- Inject reusable skills into prompts;
+- Expose the same backend through the CLI, Web UI, and VS Code.
+- Run local models alongside cloud models.
 
-## Usage
+## Repository structure
 
-Start the proxy server and all associated background services:
-```bash
-bash start.sh          # or
-bash start.sh fresh    # -> clears previous memory history and starts a completely new session
-```
+The repository is organized into four main parts:
+* `core/` contains the LiteLLM configuration, routing logic, API keys, and service configuration.
+* `lib/` contains the memory and skill-management components.
+* `ui/` contains the browser interface.
+* The top-level scripts handle installation, model discovery, starting/stopping services, and CLI queries.
 
-### Command line interface (CLI)
-
-Interact directly via the terminal. The intelligent router automatically classifies your prompt complexity and routes it to the optimal tier:
-```
-python3 query.py --query "Write a python script to parse JSON."
-python3 query.py --model fast --query "Quick syntax check..."
-python3 query.py --skill prompt-master --query "Refactor this module."
-```
-### Web dashboard UI
-
-Open your browser and navigate to `http://localhost:5000`. The web interface includes:
-- **Model control panel**: Manually pin queries to `Auto`, `Fast`, `Smart`, or `Local` tiers.
-- **Skill injector**: Select downloaded skills directly from `~/.claude/skills` via the dropdown menu.
-- **Token optimization toggle**: Automatically strips redundant whitespace and empty lines from attached context files to protect your context window.
-- **Persistent memory toggle**: Ephemerally toggle conversational memory on or off per request.
-
-### Stopping services
-Gracefully terminate background daemons and proxy servers:
-```
-./kill.sh
-```
-
-## Important nuances & troubleshooting
-
-### Handling model deprecations & 404 errors
--   **The issue:** Cloud providers frequently deprecate model endpoints (e.g., Google phasing out older Gemini 2.5 checkpoints in favor of 3.x series).
--   **The solution:** If you encounter `404 Not Found` errors in your proxy logs, run `python3 findModels.py`, copy active model IDs, and update both `core/config.yaml` and `core/routerHook.py` to target active identifiers (e.g., `gemini/gemini-3.5-flash-lite`, `gemini/gemini-3.1-pro-preview`).
-
-### Managing provider overloads & fallbacks (502 Errors)
-
--**The issue:** Free-tier endpoints (like OpenRouter open-weights or Nvidia acceleration nodes) frequently return `Service temporarily overloaded` or `502 Bad Gateway` errors.   
-- **The solution:** Prachu-GPT handles this via `router_settings` in `core/config.yaml`. When a model throws an error or hits rate limits (`allowed_fails: 1`), the proxy places that specific deployment on a temporary cooldown and seamlessly cascades through the remaining models in the group, shifting down or up across tiers as specified by your `fallbacks` rules.
-
-### Skill directory integration
-- Custom skills must reside inside `~/.claude/skills/<skill-name>/SKILL.md`. The `lib/skillLoader.py` module automatically scans this directory to dynamically populate the CLI and Web UI select dropdowns.
-
-## Explanations
-Here is a breakdown of how the whole workspace operates from start to finish.
 ```text
-.
 ├── core
 │   ├── apiKeys.sh
 │   ├── config.yaml
@@ -88,7 +29,6 @@ Here is a breakdown of how the whole workspace operates from start to finish.
 │   ├── litellm.service
 │   └── routerHook.py
 ├── lib
-│   ├── __init__.py
 │   ├── memoryManager.py
 │   └── skillLoader.py
 ├── findModels.py
@@ -102,9 +42,183 @@ Here is a breakdown of how the whole workspace operates from start to finish.
     ├── server.py
     └── style.css
 ```
+The main services use fixed local ports:
 
-When a query is entered into the terminal or the web interface, it is not sent directly to OpenAI or Google. Instead, the request is intercepted by a local background service running on port 4000. This proxy manager acts as a central switchboard.
+| Service                |   Port | Purpose               |
+|:---------------------- |:------ |:--------------------- |
+| LiteLLM proxy          | `4000` | Central LLM gateway   |
+| Local llama.cpp server | `8000` | Optional local models |
+| Web UI                 | `5000` | Browser interface     |
 
-If the model is requested as `auto`, a lightweight classifier takes a preliminary pass over the query. It categorizes the text to determine if it is a simple structural task (FAST) or a complex logic puzzle requiring deeper reasoning (SMART). Once categorized, the proxy dynamically rewrites the model parameter and forwards the prompt to an available, load-balanced API key defined in the environment files.
 
-Memory management occurs parallel to this. Sending massive conversation histories back and forth wastes tokens and slows down generation. Token bloat is avoided by pushing older messages through a background summarization routine. The system takes the older context, crushes it down into dense bullet points, and injects it back into the payload as a hidden system prompt. This keeps the AI fully aware of past instructions without burning through the contextual limits of the active models.
+## Setting up [one-time]
+
+1. Clone the repository and install the starter skill set:
+	```bash
+	git clone git@github.com:phazarik/hazar-ai.git
+	mkdir -p ~/.claude/skills
+	git clone https://github.com/nidhinjs/prompt-master.git ~/.claude/skills/prompt-master
+	```
+	Here, `prompt-master` is a Claude Code skill repository that provides reusable prompt-engineering guidance and workflows.
+
+2. Create a fresh conda environment with **Python 3.11 or higher**:
+	```bash
+	conda create -n llm python=3.11 -y
+	conda activate llm
+	pip install "litellm[proxy]" "llama-cpp-python[server]" websockets requests rich pyfiglet tqdm
+	```
+	> Python 3.10 and older are not supported because the LiteLLM proxy hooks require Python 3.11+.
+
+3. Create an environment file to keep the required API keys.
+	```bash
+	touch core/litellm.env
+	```
+	This setup uses API keys from the following providers:
+	-   [OpenRouter](https://openrouter.ai/) — access to multiple LLM providers through a single API.
+	-   [Google AI Studio](https://aistudio.google.com/) — Gemini models.
+	-   [Groq](https://console.groq.com/) — fast inference for supported open models.
+	-   [Tavily](https://tavily.com/) — web search API.
+	
+	In this example, the `litellm.env` file looks like:
+	```text
+	OPENROUTER_API_KEY=sk-or-v1-XXXXXXXXXXXX
+	GEMINI_API_KEY=AIzaSyXXXXXXXXXXXX
+	GROQ_API_KEY=gsk_XXXXXXXXXXXX
+	TAVILY_API_KEY=tvly-dev-XXXXXXXXXXXX
+	LITELLM_MASTER_KEY=sk-anything
+	```
+	`LITELLM_MASTER_KEY` is the shared authentication key used by the local components to communicate with the LiteLLM proxy. The CLI, Web UI, memory manager, and Continue configuration use this key when connecting to the proxy.
+	
+4. Find out the models and set up the configurations (specify which models to use). The available models can change frequently as providers add, remove, or rate-limit free endpoints. Check the currently available models with:
+	```bash
+	python3 findModels.py
+	```
+	Update `core/config.yaml` to choose which models belong to the `fast` and `smart` groups. The two groups are intended for different workloads:
+	- `fast`: quick questions, syntax checks, and simple completions.
+	- `smart`: deeper reasoning, debugging, and multi-step tasks.
+
+	LiteLLM can automatically move between deployments when a model fails or reaches a rate limit.
+	
+5. Run the setup script after configuring.
+	```bash
+	python3 setup.py
+	```
+	This performs the repository-specific setup required to initialize the environment. It checks that the required configuration files and dependencies are present, creates the necessary symbolic links, sets executable permissions on scripts, configures the background services, and generates the Continue configuration from the provided settings. It also prepares the required directories and local configuration so that the CLI, Web UI, memory manager, LiteLLM proxy, and other components can work together without further manual configuration.
+
+## Usage
+
+Start the proxy and associated services with:
+```bash
+bash start.sh        # or,
+bash start.sh fresh  # start with a completely new conversation history
+```
+### Command-line interface
+
+The CLI sends requests through the local LiteLLM proxy. Some example usage are listed below.
+```bash
+python3 query.py --query "Write a python script to parse JSON."
+python3 query.py --model fast --query "Quick syntax check..."
+python3 query.py --skill prompt-master --query "Refactor this module."
+```
+When no model is specified, the router classifies the request and selects an appropriate model group automatically.
+
+### Web UI
+
+Open the following link on a web-browser.
+```text
+http://localhost:5000
+```
+
+The web UI provides:
+
+* **Model control:** select `Auto`, `Fast`, `Smart`, or `Local`.
+* **Skill injection:** select skills from `~/.claude/skills`.
+* **Token optimization:** remove redundant whitespace and empty lines from attached context files.
+* **Persistent memory:** enable or disable conversational memory for individual requests.
+
+### Integration with VS Code
+
+The `setup.py` script generates the Continue configuration at `~/.continue/config.yaml`. To use it, install the Continue extension in VS Code and select `local-router`. Coding prompts, inline edits, and completions are then routed through the local LiteLLM proxy on port `4000`.
+
+Finally, to stop the proxy and background services:
+```bash
+bash kill.sh
+```
+## Customization
+
+### Local models
+This setup can run local `.gguf` models using `llama.cpp`. Place a `.gguf` model in:
+```text
+model/
+```
+Then start the local server:
+```bash
+bash start.sh local
+```
+The local server listens on port `8000`. The `local` model alias is configured in `core/config.yaml`, allowing the model to be selected from both the CLI and Web UI.
+
+### Skills
+A skill is a directory containing instructions that can be injected into a conversation to give the model specialized behavior or knowledge. Skills are stored under:
+```text
+~/.claude/skills/<skill-name>/SKILL.md
+```
+The skill loader scans this directory and makes discovered skills available to both the CLI and web UI. Additional reference material can be placed in the skill's `references/` directory. `lib/skillLoader.py` limits oversized skill instructions to keep them from consuming excessive context.
+
+### Personality
+The Web UI defines the model persona in `ui/server.py`. The default configuration refers to the user as `Neo` and the assistant as `Morpheus`:
+```python
+system_msg = {
+    "role": "system",
+    "content": "You are Morpheus. The user is Neo. "
+    "You have perfect memory of all previous turns provided in this context. "
+    "Format your responses cleanly in Markdown. "
+    "Do not start your response with a large header."
+}
+```
+This can be changed to customize the default system prompt.
+
+## How things work
+
+A request passes through several components before the response reaches the user.
+
+- **Automatic routing:** When `Auto` is selected, `core/routerHook.py` intercepts the request and classifies its difficulty. A lightweight model is first asked whether the task is simple or complex. Simple requests are sent to the `fast` group, while multi-step reasoning, debugging, and similar tasks are sent to the `smart` group. If the classification request fails, the router falls back to keyword-based classification.
+
+- **Provider fallback:** The LiteLLM proxy manages multiple deployments within each model group. If a deployment returns a rate-limit or gateway error, it is temporarily cooled down, and the proxy continues with another available deployment according to the fallback configuration in `core/config.yaml`. This allows the system to continue operating even when individual free-tier endpoints become unavailable.
+
+- **Skills and context:** `lib/skillLoader.py` discovers skills and loads their instructions and reference material. For CLI requests, `query.py` combines the user prompt with the selected skills, attached files, and previous conversation context. The resulting request is sent to the LiteLLM proxy on port `4000`.
+
+- **Conversational memory:** `lib/memoryManager.py` keeps conversation context available across model changes. Conversation turns are stored in `memory/graph.json`.  Once a conversation becomes long, the most recent messages are kept intact while older messages are compressed into `memory/summary.txt`. The summary is then included in subsequent requests, reducing context usage while retaining important decisions, errors, and other information. The memory manager also fingerprints attached files so that identical files do not need to be repeatedly inserted into the context.
+
+- **Web interface:** `ui/server.py` provides the browser interface and handles streaming responses. The frontend consists of one HTML, one CSS, and one JavaScript file. Completed conversations are passed to the memory manager so that the Web UI can maintain context in the same way as the CLI.
+
+## Troubleshooting
+
+### Model deprecations and 404 errors
+
+Cloud providers regularly deprecate or rename model endpoints. A deprecated model may therefore produce a `404 Not Found` error in the proxy logs. First check the currently available models:
+```bash
+python3 findModels.py
+```
+Then update the model identifiers in:
+```text
+core/config.yaml
+core/routerHook.py
+```
+
+### Provider overloads and 502 errors
+Free-tier endpoints can temporarily return errors such as:
+```text
+Service temporarily overloaded
+502 Bad Gateway
+```
+The fallback configuration in `core/config.yaml` allows LiteLLM to temporarily disable failing deployments and continue with other models. If failures persist, check which deployments are currently available with:
+```bash
+python3 findModels.py
+```
+
+### Skills are not appearing
+Make sure the skill follows the expected structure:
+```text
+~/.claude/skills/<skill-name>/SKILL.md
+```
+The directory is scanned dynamically by `lib/skillLoader.py`. Restarting the Hazar-ai services after adding or modifying a skill ensures that the updated configuration is loaded.

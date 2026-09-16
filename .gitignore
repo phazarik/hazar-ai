@@ -5,6 +5,7 @@ core/litellm.env
 .vscode/
 **/*~
 **/*#
+codebase.md
 
 # --- logs ---
 core/litellm.log
