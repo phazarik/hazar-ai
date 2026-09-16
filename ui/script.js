@@ -2,11 +2,13 @@
 // Frontend Logic Core
 // =============================================================================
 
-// Configure Markdown parser to render LaTeX math equations natively
-marked.use(window.markedKatex({
-    throwOnError: false, // Prevents a single missing bracket from breaking the whole chat rendering
-    output: 'html'
-}));
+// Configure Markdown parser safely (render LaTeX math equations natively)
+if (typeof marked !== "undefined" && typeof window.markedKatex === "function") {
+    marked.use(window.markedKatex({
+        throwOnError: false,
+        output: 'html'
+    }));
+}
 
 // Global variables to hold the state of the application.
 // 'let' for variables that will change, and 'const' for constants.
@@ -74,7 +76,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // --- Sending Queries ---
+    // -ending Queries ---
     document.getElementById("sendBtn").addEventListener("click", () => {
         if (isGenerating) {
             // If the bot is currently typing, the button acts as a "Stop" button.
@@ -84,11 +86,11 @@ document.addEventListener("DOMContentLoaded", () => {
             sendQuery();
         }
     });
-    
-    // Allow pressing "Enter" to send, but "Shift+Enter" to just make a new line.
+
+    // Allow pressing "Shift+Enter" or "Ctrl+Enter" to send, but regular "Enter" to just make a new line.
     const queryInput = document.getElementById("queryInput");
     queryInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.shiftKey) {
+        if (e.key === "Enter" && (e.shiftKey || e.ctrlKey)) {
             e.preventDefault(); // Prevents adding a rogue newline character before sending
             if (!isGenerating) sendQuery();
         }
@@ -111,42 +113,108 @@ document.addEventListener("DOMContentLoaded", () => {
     queryInput.addEventListener("input", autoGrowInput);
     queryInput.addEventListener("paste", () => setTimeout(autoGrowInput, 0));
 
-    // --- Manual Resize Handle ---
-    // Allows the user to click and drag the divider to make the text input larger.
-    const resizeHandle = document.getElementById("chatResizeHandle");
+    // --- Resize Handles (Mouse & Touch Helpers) ---
+    // Extracts coordinates seamlessly whether via standard mouse or touchscreen
+    const getClientY = (e) => e.touches ? e.touches[0].clientY : e.clientY;
+    const getClientX = (e) => e.touches ? e.touches[0].clientX : e.clientX;
 
-    if (resizeHandle && queryInput) {
-        let dragging = false;
+    // --- Manual Resize Handle (Text Box) ---
+    // Allows the user to click and drag the divider to make the text input larger.
+    const chatResizeHandle = document.getElementById("chatResizeHandle");
+
+    if (chatResizeHandle && queryInput) {
+        let draggingChat = false;
         let startY = 0;
         let startHeight = 0;
 
-        const onPointerMove = (e) => {
-            if (!dragging) return;
-            // The browser screen coordinates put Y=0 at the top. 
-            // Dragging upwards means a smaller Y value.
-            const delta = startY - e.clientY; 
-            const newHeight = Math.max(80, startHeight + delta); // Enforce minimum height
+        const onChatPointerMove = (e) => {
+            if (!draggingChat) return;
+            const delta = startY - getClientY(e); 
+            const newHeight = Math.max(50, startHeight + delta); // Enforce minimum height
             
             queryInput.style.height = `${newHeight}px`;
             isManuallyResized = true; // Lock out the auto-grow feature
         };
-        const stopDragging = () => {
-            dragging = false;
-            document.body.classList.remove("resizing-chat"); // Restores normal text selection
+        const stopChatDragging = () => {
+            draggingChat = false;
+            document.body.classList.remove("resizing-chat"); 
         };
 
-        // When the user clicks down on the handle, initialize the dragging state
-        resizeHandle.addEventListener("mousedown", (e) => {
-            dragging = true;
-            startY = e.clientY;
+        const startChatDrag = (e) => {
+            draggingChat = true;
+            startY = getClientY(e);
             startHeight = queryInput.getBoundingClientRect().height;
             document.body.classList.add("resizing-chat"); // Prevents text selection while dragging
-            e.preventDefault();
-        });
+            if (!e.touches) e.preventDefault(); // Don't prevent default on touch to avoid passive listener warnings
+        };
         
-        // Attach these to the whole 'document' so the drag doesn't break if the mouse moves off the handle
-        document.addEventListener("mousemove", onPointerMove);
-        document.addEventListener("mouseup", stopDragging);
+        chatResizeHandle.addEventListener("mousedown", startChatDrag);
+        chatResizeHandle.addEventListener("touchstart", startChatDrag, { passive: true });
+        
+        document.addEventListener("mousemove", onChatPointerMove);
+        document.addEventListener("touchmove", onChatPointerMove, { passive: true });
+        
+        document.addEventListener("mouseup", stopChatDragging);
+        document.addEventListener("touchend", stopChatDragging);
+    }
+    
+    // --- Manual Resize Handle (Side Panel) ---
+    // Resizes the right diagnostic panel horizontally on desktop, or vertically on mobile
+    const panelResizeHandle = document.getElementById("panelResizeHandle");
+    const rightPanel = document.querySelector(".right-panel");
+
+    if (panelResizeHandle && rightPanel) {
+        let draggingPanel = false;
+        let startX = 0;
+        let startY = 0;
+        let startWidth = 0;
+        let startHeight = 0;
+
+        const onPanelPointerMove = (e) => {
+            if (!draggingPanel) return;
+            
+            // Check if the CSS media query condition applies (mobile breakpoint)
+            const isMobile = window.innerWidth <= 768;
+            
+            if (isMobile) {
+                // Stacked vertically: dragging UP means larger right panel
+                const delta = startY - getClientY(e);
+                const newHeight = Math.max(100, startHeight + delta);
+                rightPanel.style.height = `${newHeight}px`;
+                rightPanel.style.width = ""; // Reset width override 
+            } else {
+                // Side-by-side: dragging LEFT means larger right panel
+                const delta = startX - getClientX(e);
+                const newWidth = Math.max(200, startWidth + delta);
+                rightPanel.style.width = `${newWidth}px`;
+                rightPanel.style.height = ""; // Reset height override
+            }
+        };
+
+        const stopPanelDragging = () => {
+            draggingPanel = false;
+            document.body.classList.remove("resizing-panel");
+        };
+
+        const startPanelDrag = (e) => {
+            draggingPanel = true;
+            startX = getClientX(e);
+            startY = getClientY(e);
+            const rect = rightPanel.getBoundingClientRect();
+            startWidth = rect.width;
+            startHeight = rect.height;
+            document.body.classList.add("resizing-panel");
+            if (!e.touches) e.preventDefault();
+        };
+
+        panelResizeHandle.addEventListener("mousedown", startPanelDrag);
+        panelResizeHandle.addEventListener("touchstart", startPanelDrag, { passive: true });
+
+        document.addEventListener("mousemove", onPanelPointerMove);
+        document.addEventListener("touchmove", onPanelPointerMove, { passive: true });
+        
+        document.addEventListener("mouseup", stopPanelDragging);
+        document.addEventListener("touchend", stopPanelDragging);
     }
 
     // --- Toolbar Buttons ---
@@ -161,12 +229,44 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
+    // Max Tokens Toggle UX
+    const limitToggle = document.getElementById("limitTokensToggle");
+    const maxTokensInput = document.getElementById("maxTokensInput");
+    if (limitToggle && maxTokensInput) {
+        limitToggle.addEventListener("change", (e) => {
+            maxTokensInput.disabled = !e.target.checked;
+            // Optionally dim the input when disabled
+            maxTokensInput.style.opacity = e.target.checked ? "1" : "0.5";
+        });
+    }
+
+    // Welcome Modal Logic
+    const welcomeModal = document.getElementById("welcomeModal");
+    const closeWelcomeBtn = document.getElementById("closeWelcomeBtn");
+    const helpBtn = document.getElementById("helpBtn"); // Reference the new Help button
+
+    if (welcomeModal && closeWelcomeBtn) {
+        // Automatically show the modal every time the UI reloads
+        welcomeModal.classList.remove("hidden");
+
+        closeWelcomeBtn.addEventListener("click", () => {
+            welcomeModal.classList.add("hidden");
+        });
+    }
+
+    // Help button logic to display the modal whenever the user wants
+    if (helpBtn && welcomeModal) {
+        helpBtn.addEventListener("click", () => {
+            welcomeModal.classList.remove("hidden");
+        });
+    }
+
     // Token Optimization Toggle
     const optBtn = document.getElementById("optimizeTokensBtn");
     optBtn.addEventListener("click", () => {
         optimizeTokens = !optimizeTokens; // Flip the boolean state
         optBtn.classList.toggle("active", optimizeTokens); // Update UI
-        optBtn.innerHTML = `<i class="bi bi-lightning-charge"></i> Optimize Tokens: ${optimizeTokens ? "ON" : "OFF"}`;
+        optBtn.innerHTML = `<i class="bi bi-lightning-charge"></i> <span class="btn-text">Optimize: ${optimizeTokens ? "ON" : "OFF"}</span>`;
     });
 
     // Memory Toggle
@@ -174,8 +274,21 @@ document.addEventListener("DOMContentLoaded", () => {
     memBtn.addEventListener("click", () => {
         memoryEnabled = !memoryEnabled;
         memBtn.classList.toggle("active", memoryEnabled);
-        memBtn.innerHTML = `<i class="bi bi-cpu"></i> Memory: ${memoryEnabled ? "ON" : "OFF"}`;
+        memBtn.innerHTML = `<i class="bi bi-cpu"></i> <span class="btn-text">Memory: ${memoryEnabled ? "ON" : "OFF"}</span>`;
     });
+    
+    // Memory Status Check
+    const memStatusBtn = document.getElementById("memStatusBtn");
+    if (memStatusBtn) {
+        memStatusBtn.addEventListener("click", () => {
+            fetch("/api/status")
+                .then(res => res.json())
+                .then(data => {
+                    appendLog(`Status | Turns: ${data.turns}, Summary: ${data.summaryChars} chars, Cached Files: ${data.cachedFiles}`);
+                })
+                .catch(err => appendLog("Failed to fetch memory status.", true));
+        });
+    }
 
     // Clear Memory Button ---
     const clearBtn = document.getElementById("clearMemoryBtn");
@@ -402,12 +515,13 @@ function createMsgBox(role) {
 // We use 'async' so we can use 'await' inside. This allows us to pause execution 
 // waiting for the network without freezing the browser tab.
 async function sendQuery() {
-    const queryInput = document.getElementById("queryInput");
     const sendBtn = document.getElementById("sendBtn");
     const attachBtn = document.getElementById("attachBtn");
     const bufferIcon = document.getElementById("loadingBuffer");
     const skillSelector = document.getElementById("skillSelector");
     const historyContainer = document.getElementById("history");
+    const limitTokensToggle = document.getElementById("limitTokensToggle");
+    const maxTokensInput = document.getElementById("maxTokensInput");
     
     const query = queryInput.value.trim();
     
@@ -422,14 +536,14 @@ async function sendQuery() {
     
     // Reset the text box size to normal
     isManuallyResized = false; 
-    queryInput.style.height = "50px"; 
+    queryInput.style.height = "120px"; 
     
     // Lock the UI so the user can't send overlapping requests
     isGenerating = true;
     currentAbortController = new AbortController(); // Used to cancel the fetch request if "Stop" is clicked
     queryInput.disabled = true;
     attachBtn.disabled = true;
-    sendBtn.innerHTML = `<i class="bi bi-stop-circle"></i> Stop`;
+    sendBtn.innerHTML = `<i class="bi bi-stop-circle"></i> <span class="btn-text">Stop</span>`;
     if (bufferIcon) bufferIcon.style.display = "inline-block";
     
     // Prep the files to be sent to Python
@@ -463,7 +577,8 @@ async function sendQuery() {
                 files: filesPayload,
                 model: selectedModel, 
                 noMemory: !memoryEnabled,
-                skill: skillSelector ? skillSelector.value : ""
+                skill: skillSelector ? skillSelector.value : "",
+                maxTokens: (limitTokensToggle && limitTokensToggle.checked) ? parseInt(maxTokensInput.value) : null
             })
         });
         
@@ -520,7 +635,6 @@ async function sendQuery() {
                     const parsedHTML = marked.parse(reply);
                     
                     // Clean the HTML using DOMPurify to prevent malicious script injection.
-                    // The fallback you requested to remove is gone; this assumes DOMPurify is loaded.
                     morpheusBox.innerHTML = DOMPurify.sanitize(parsedHTML);
                     
                     if (isAtBottom) {
@@ -571,7 +685,7 @@ async function sendQuery() {
         currentAbortController = null;
         queryInput.disabled = false;
         attachBtn.disabled = false;
-        sendBtn.innerHTML = `<i class="bi bi-send"></i> Send`;
+        sendBtn.innerHTML = `<i class="bi bi-send"></i> <span class="btn-text">Send</span>`;
         if (bufferIcon) bufferIcon.style.display = "none";
         
         queryInput.focus(); // Automatically put the cursor back in the text box

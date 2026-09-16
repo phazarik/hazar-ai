@@ -1,25 +1,28 @@
 <!DOCTYPE html>
 <html lang="en">
+<!-- ui/index.html -->
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>hazar-ai</title>
-  
-  <!-- ADDED: Browser tab icon (favicon) -->
   <link rel="icon" href="/.image/logo.png" type="image/png">
   
   <!-- External Libraries: Syntax highlighting, Icons, and Markdown parsing -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   
-  <!-- ADDED: KaTeX for native LaTeX math rendering -->
+  <!-- KaTeX for native LaTeX math rendering -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked-katex-extension@5.0.0/lib/index.umd.js"></script>
-
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked-katex-extension@5.0.0/lib/index.umd.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+
+  <!-- Web Font Import (Fira Code) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;700&display=swap" rel="stylesheet">
   
   <!-- Local Stylesheet -->
   <link rel="stylesheet" href="/style.css">
@@ -56,7 +59,7 @@
 
         <!-- Drag handle: lets the user resize the chat history area up/down.
              The footer (toolbar + input row) below it keeps a fixed size. -->
-        <div class="chat-resize-handle" id="chatResizeHandle" title="Drag to resize"></div>
+        <div class="chat-resize-handle" id="chatResizeHandle" title="Drag to resize text box"></div>
 
         <!-- Footer / Input Area -->
         <footer>
@@ -66,29 +69,42 @@
 	  <!-- Toolbar: Model selection, Skills, and System Controls -->
           <div class="toolbar-row">
             <div class="tool-group">
-              <span class="tool-label">MODEL:</span>
+              <span class="tool-label">Model:</span>
               <button type="button" class="tool-btn active" data-model="auto">Auto</button>
               <button type="button" class="tool-btn" data-model="fast">Fast</button>
               <button type="button" class="tool-btn" data-model="smart">Smart</button>
               <button type="button" class="tool-btn" data-model="local">Local</button>
               
               <!-- Skill Selector placed right next to the model buttons -->
-              <span class="tool-label" style="margin-left: 10px;">SKILL:</span>
+              <span class="tool-label" style="margin-left: 10px;">Skill:</span>
               <select id="skillSelector" class="tool-btn">
                 <option value="">None</option>
               </select>
+
+              <!-- Max Tokens Toggle & Input -->
+              <span class="tool-label" style="margin-left: 10px; display: inline-flex; align-items: center; gap: 4px;">
+                <input type="checkbox" id="limitTokensToggle" checked title="Limit output length"> 
+                Max Tokens:
+              </span>
+              <input type="number" id="maxTokensInput" class="tool-btn" value="900" style="width: 70px;" title="Maximum generated tokens">
             </div>
 
             <div class="tool-group">
               <span class="tool-label">CONTROLS:</span>
+	      <button type="button" class="tool-btn" id="helpBtn" title="Show Help/Welcome Modal">
+                <i class="bi bi-question-circle"></i> <span class="btn-text">Help</span>
+              </button>
+              <button type="button" class="tool-btn" id="memStatusBtn" title="Check Memory Status">
+                <i class="bi bi-info-circle"></i> <span class="btn-text">Status</span>
+              </button>
               <button type="button" class="tool-btn" id="optimizeTokensBtn" title="Strips empty lines & whitespace from attached files">
-                <i class="bi bi-lightning-charge"></i> Optimize Tokens: OFF
+                <i class="bi bi-lightning-charge"></i> <span class="btn-text">Optimize: OFF</span>
               </button>
               <button type="button" class="tool-btn active" id="toggleMemoryBtn" title="Toggle memory persistence">
-                <i class="bi bi-cpu"></i> Memory: ON
+                <i class="bi bi-cpu"></i> <span class="btn-text">Memory: ON</span>
               </button>
 	      <button type="button" class="tool-btn" id="clearMemoryBtn" title="Wipe conversation history">
-                <i class="bi bi-trash"></i> Clear Memory
+                <i class="bi bi-trash"></i> <span class="btn-text">Clear Memory</span>
               </button>
             </div>
           </div>
@@ -97,7 +113,7 @@
           <div class="input-row">
             <!-- Hidden file input triggered by the Attach button -->
             <input type="file" id="fileInput" multiple style="display:none;">
-            <button id="attachBtn"><i class="bi bi-paperclip"></i> Attach file</button>
+            <button id="attachBtn"><i class="bi bi-paperclip"></i> <span class="btn-text">Attach file</span></button>
             
             <textarea id="queryInput" placeholder="ENTER QUERY..."></textarea>
             
@@ -106,11 +122,18 @@
 		  style="display:none; color: var(--accent); align-self: center; font-size: 20px;">
 	      <i class="bi bi-arrow-repeat"></i>
 	    </span>
+
+	    <div class="send-container">
+	      <button id="sendBtn"><i class="bi bi-send"></i> <span class="btn-text">Send</span></button>
+	      <span class="send-hint">Ctrl/Shift + Enter</span>
+	    </div>
             
-            <button id="sendBtn"><i class="bi bi-send"></i> Send</button>
           </div>
         </footer>
       </div>
+
+      <!-- Drag handle for adjusting the side panel size -->
+      <div class="panel-resize-handle" id="panelResizeHandle" title="Drag to resize panel"></div>
 
       <!-- ======================================== -->
       <!-- RIGHT PANEL: Diagnostics and Logs        -->
@@ -131,6 +154,26 @@
         </div>
       
       </div>
+    </div>
+  </div>
+
+  <!-- ======================================== -->
+  <!-- WELCOME MODAL OVERLAY                    -->
+  <!-- ======================================== -->
+  <div class="modal-overlay hidden" id="welcomeModal">
+    <div class="modal-content">
+      <h2> <i class="bi bi-question-circle"></i> Help</h2>
+      <p>Hello! Here is the control panel overview:</p>
+      <ul>
+        <li><strong>Model:</strong> Selects the intelligence tier. Auto (default) dynamically routes to Fast or Smart based on prompt complexity.</li>
+        <li><strong>Skill:</strong> Injects specific system instructions into the LLM context. I am using prompt-master by default.</li>
+        <li><strong>Max Tokens:</strong> Caps the length of the generated response. 900 is a reasonable number. Uncheck to remove the limit entirely.</li>
+	<li><strong>Status:</strong> Outputs the current size of the memory database to the log window.</li>
+        <li><strong>Optimize:</strong> Strips whitespace and empty lines from attached files to save context space.</li>
+        <li><strong>Memory:</strong> Retains conversation history.</li>
+        <li><strong>Claer Memory:</strong> Wipes all conversation history.</li>
+      </ul>
+      <button class="modal-close-btn" id="closeWelcomeBtn">Okay</button>
     </div>
   </div>
 

@@ -30,6 +30,7 @@ import skillLoader as skills
 
 ## The proxy endpoint details. The UI server acts as a middleman, receiving
 ## web traffic from the browser and formatting it for the LiteLLM proxy.
+# ui/server.py (Around lines 31-32)
 PROXY_URL     = "http://127.0.0.1:4000/chat/completions"
 PROXY_HEADERS = {"Content-Type": "application/json", "Authorization": "Bearer sk-anything"}
 UI_DIR        = os.path.dirname(os.path.abspath(__file__))
@@ -156,7 +157,7 @@ class Handler(BaseHTTPRequestHandler):
                         break
         except Exception: pass
             
-        # Fallback heuristics if the proxy is missing the exact data
+        ## Fallback if the proxy is missing the exact data
         if limit == 8192:
             lower_name = model_name.lower()
             if "gemini" in lower_name: limit = 1048576
@@ -180,7 +181,7 @@ class Handler(BaseHTTPRequestHandler):
         model     = body.get("model", "auto")
         skillName = body.get("skill", "").strip() or None
         noMemory  = body.get("noMemory", False)
-        maxTokens = int(body.get("maxTokens", 900))
+        maxTokens = body.get("maxTokens")
 
         if not query:
             self.writeSse("error", "Empty query.")
@@ -236,13 +237,17 @@ class Handler(BaseHTTPRequestHandler):
         }
         messages.insert(0, system_msg)
         self.writeSse("log", f"Sending to proxy (model: {model}, messages: {len(messages)})")
+        
         payload = {
             "model": model,
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
-            "max_tokens": maxTokens,
         }
+        
+        ## Only include max_tokens if explicitly requested (not toggled off)
+        if maxTokens is not None:
+            payload["max_tokens"] = int(maxTokens)
         
         reply = ""
         actualModel = "unknown"

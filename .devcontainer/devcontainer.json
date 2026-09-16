@@ -1,0 +1,12 @@
+{
+  "name": "hazar-ai Environment",
+  "image": "[mcr.microsoft.com/devcontainers/python:3.11](https://mcr.microsoft.com/devcontainers/python:3.11)",
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postAttachCommand": "echo -e '\\033[1;33mPlease enter your API keys in core/litellm.env before running ./start.sh\\033[0m'",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python"]
+    }
+  },
+  "forwardPorts": [5000, 4000]
+}
