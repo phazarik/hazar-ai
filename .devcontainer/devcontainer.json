@@ -1,12 +1,29 @@
+// ----------------------------------------------------------------------------
+// Development-container settings
+//
+// Uses a Python 3.11 container for Linux-compatible setup and startup.
+// Runs the setup helper after creation and forwards UI/gateway ports.
+// JSON with comments is supported by the development-container tools.
+// ----------------------------------------------------------------------------
+
 {
   "name": "hazar-ai Environment",
-  "image": "[mcr.microsoft.com/devcontainers/python:3.11](https://mcr.microsoft.com/devcontainers/python:3.11)",
+  // Match the Python version required by the gateway.
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  // Install requirements and generate integration files after creation.
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "postAttachCommand": "echo -e '\\033[1;33mPlease enter your API keys in core/litellm.env before running ./start.sh\\033[0m'",
+  // Add Python editor support inside the container workspace.
   "customizations": {
     "vscode": {
-      "extensions": ["ms-python.python"]
+      "extensions": [
+        "ms-python.python"
+      ]
     }
   },
-  "forwardPorts": [5000, 4000]
+  // Expose the web UI and gateway to the host.
+  "forwardPorts": [
+    5000,
+    4000
+  ]
 }

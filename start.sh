@@ -1,57 +1,59 @@
 #!/usr/bin/env bash
-# -------------------------------------------------------------------------
-# Unified startup script for hazar-ai services.
-# Usage: ./start.sh [proxy|local|ui|all|fresh|offline]
-# -------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Service startup
+#
+# Starts the gateway, browser backend, and optional local model servers.
+# Stops matching old services before opening their ports again.
+# Modes: proxy, local, ui, all, fresh, offline. Default: all.
+# Offline keeps only local routes; all/fresh keep cloud and local aliases.
+# ----------------------------------------------------------------------------
 
+set -e
 cd "$(dirname "$0")" || exit 1
+## Include core for callback imports; keep existing Python paths too.
+export PYTHONPATH="$PWD/core:$PWD${PYTHONPATH:+:$PYTHONPATH}"
 COMMAND=${1:-all}
 YELLOW='\033[33m'
 BOLD_YELLOW='\033[1;33m'
 RESET='\033[0m'
 
-## Always start from a clean slate: kill any previously running proxy, UI,
-## or local model server before doing anything else. This avoids stacking
-## up duplicate background processes (and stale port binds) every time
-## start.sh is re-run.
 echo ">> Killing any existing hazar-ai services first..."
 bash kill.sh
 
-## Securely load API keys and environment variables into the shell session.
-## 'set -a' exports all variables defined in the sourced file automatically.
+## Export settings for the proxy and local clients.
 if [ -f core/litellm.env ]; then
     set -a
     source core/litellm.env
     set +a
 fi
 
-## Safeguard against a missing master key. The proxy requires this to authenticate
-## incoming local requests. If missing, a default is injected.
+## Generate a gateway key if setup has not created one yet.
 if [ -z "$LITELLM_MASTER_KEY" ]; then
-    echo ">> LITELLM_MASTER_KEY is not set. Injecting default key into core/litellm.env..."
-    echo 'LITELLM_MASTER_KEY="sk-anything"' >> core/litellm.env
-    export LITELLM_MASTER_KEY="sk-anything"
+    echo ">> LITELLM_MASTER_KEY is not set. Generating private key in core/litellm.env..."
+    umask 077
+    mkdir -p core
+    export LITELLM_MASTER_KEY="$(python3 -c 'import secrets; print("sk-" + secrets.token_hex(32))')"
+    printf 'LITELLM_MASTER_KEY="%s"\n' "$LITELLM_MASTER_KEY" >> core/litellm.env
+    chmod 600 core/litellm.env
 fi
 
-## Boots the core LiteLLM proxy in the background on port 4000, using the
-## given config file (defaults to the standard cloud+local config).
+## PYTHONPATH lets LiteLLM import the routing callback from core/.
 start_proxy() {
     local config_file=${1:-core/config.yaml}
     echo ">> Starting LiteLLM proxy on port 4000 (config: $config_file)..."
+    # Detach the process from this terminal and write its logs under core.
     nohup setsid litellm --config "$config_file" --port 4000 > core/litellm.log 2>&1 &
     echo ">> LiteLLM proxy started (PID $!)."
 }
 
-## Scans models/ for every .gguf file and boots one llama.cpp inference
-## server per model, on sequential ports starting at 8000. Also writes
-## core/config.local.generated.yaml so the proxy can reach every model
-## found, under aliases "local" (the first model found) and
-## "local:<filename-without-extension>" (every model, individually).
-## Sets LOCAL_MODEL_COUNT so callers can tell whether anything was found.
+## Start one server per GGUF file on consecutive ports from 8000.
 start_local() {
     MODEL_DIR="./models"
     mkdir -p "$MODEL_DIR"
-    mapfile -t MODEL_FILES < <(ls "$MODEL_DIR"/*.gguf 2>/dev/null)
+    ## An empty model folder needs an empty array, not a literal *.gguf path.
+    shopt -s nullglob
+    MODEL_FILES=("$MODEL_DIR"/*.gguf)
+    shopt -u nullglob
 
     LOCAL_MODEL_COUNT=${#MODEL_FILES[@]}
     if [ "$LOCAL_MODEL_COUNT" -eq 0 ]; then
@@ -62,7 +64,6 @@ start_local() {
     echo ">> Found $LOCAL_MODEL_COUNT local model(s) in $MODEL_DIR. Starting one server per model..."
 
     local port=8000
-    local entries=""
     for model_file in "${MODEL_FILES[@]}"; do
         local model_name
         model_name=$(basename "$model_file")
@@ -73,47 +74,35 @@ start_local() {
             > "core/local_model_${model_name}.log" 2>&1 &
         echo ">> Local inference server started (PID $!)."
 
-        entries="${entries}  - model_name: local:${model_name}\n    litellm_params:\n      model: openai/local\n      api_base: http://localhost:${port}/v1\n      api_key: sk-local\n"
-        # The first model found is also registered under the plain "local" alias,
-        # so existing CLI/Web UI usage of --model local keeps working unchanged.
-        if [ "$port" -eq 8000 ]; then
-            entries="${entries}  - model_name: local\n    litellm_params:\n      model: openai/local\n      api_base: http://localhost:${port}/v1\n      api_key: sk-local\n"
-        fi
         port=$((port + 1))
     done
 
-    ## Regenerate the local-only proxy config used by "offline" mode, and by
-    ## anything that wants to talk to a specific local model via its alias.
-    {
-        echo "# Auto-generated by start.sh — do not edit by hand."
-        echo "# Lists every .gguf model found under models/, one per llama.cpp server."
-        echo "model_list:"
-        echo -e "$entries"
-        echo "router_settings:"
-        echo "  routing_strategy: usage-based-routing"
-        echo "general_settings:"
-        echo "  master_key: os.environ/LITELLM_MASTER_KEY"
-    } > core/config.local.generated.yaml
-    echo ">> Wrote core/config.local.generated.yaml with $LOCAL_MODEL_COUNT local model alias(es)."
+    ## Pass the startup file order unchanged so model ports and aliases match.
+    python3 core/generateLocalConfig.py "${MODEL_FILES[@]}"
+    echo ">> Generated cloud/local and offline configurations."
+
 }
 
-## Boots the local Python web server to host the browser UI.
+## The UI forwards completions through the authenticated gateway.
 start_ui() {
     echo ">> Starting Web UI on port 5000..."
     nohup setsid python3 ui/server.py > core/ui.log 2>&1 &
     echo ">> Web UI started (PID $!)."
 }
 
-# -------------------------------------------------------------------------
-# Execution Routing
-# -------------------------------------------------------------------------
+## Offline mode uses a local-only config with no cloud routing callback.
 case "$COMMAND" in
-    # The 'fresh' argument wipes previous memory caches before starting
+
+    ## Fresh mode clears shared chat memory before starting services.
     fresh)
         echo ">> Starting fresh session. Clearing previous memory databases..."
         python3 query.py --clear-memory
-        start_proxy
         start_local
+        if [ "${LOCAL_MODEL_COUNT:-0}" -gt 0 ]; then
+            start_proxy core/config.runtime.generated.yaml
+        else
+            start_proxy
+        fi
         start_ui
         ;;
     proxy)
@@ -126,13 +115,16 @@ case "$COMMAND" in
         start_ui
         ;;
     all)
-        start_proxy
         start_local
+        if [ "${LOCAL_MODEL_COUNT:-0}" -gt 0 ]; then
+            start_proxy core/config.runtime.generated.yaml
+        else
+            start_proxy
+        fi
         start_ui
         ;;
-    # 'offline' only starts local .gguf model server(s) plus a proxy pointed
-    # at the generated local-only config, so no cloud API key is ever
-    # contacted. Use --model local (or local:<name>) with query.py/the Web UI.
+
+    ## Use local routes without a cloud classifier callback in this branch.
     offline)
         start_local
         if [ "${LOCAL_MODEL_COUNT:-0}" -eq 0 ]; then
@@ -148,7 +140,6 @@ case "$COMMAND" in
         ;;
 esac
 
-## Provide helpful CLI feedback and tail the proxy logs for live monitoring
 if [[ "$COMMAND" == "all" || "$COMMAND" == "fresh" || "$COMMAND" == "offline" ]]; then
     echo ""
     echo -e ">> Web UI is live at: ${BOLD_YELLOW}http://localhost:5000${RESET}"
@@ -169,5 +160,6 @@ if [[ "$COMMAND" == "all" || "$COMMAND" == "fresh" || "$COMMAND" == "offline" ]]
     echo ""
     echo ">> All services initiated. Tailing proxy logs (Press Ctrl+C to exit log view)..."
     sleep 1
+    ## Ctrl+C stops this log view; kill.sh stops the background services.
     tail -f core/litellm.log
 fi

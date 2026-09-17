@@ -1,65 +1,63 @@
 #!/usr/bin/env python3
-# ------------------------------------------------------------------------------
-# Local Web Interface Backend
+# ----------------------------------------------------------------------------
+# Web UI backend
 #
-# This script spins up a standard Python HTTP server. It serves static assets
-# for the UI and exposes a simple REST/SSE API to communicate with the proxy.
-#
-# Architecture mapping:
-#   GET  /            -> serves index.html
-#   GET  /api/skills  -> lists available system prompts/skills
-#   GET  /api/status  -> provides memory diagnostic status
-#   POST /api/query   -> runs an LLM query and streams events via SSE
-#   POST /api/clear   -> clears historical memory caches
-# ------------------------------------------------------------------------------
+# Serves the browser page, styles, script, and logo on port 5000.
+# API routes expose skills, memory, history, and generated downloads.
+# Query requests are sent to the gateway and streamed back as SSE events.
+# Only complete replies are saved to memory and the output folder.
+# ----------------------------------------------------------------------------
 
 import sys
 import os
 import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote, parse_qs
+import uuid
 import requests as req_lib
 
-## Dynamically resolve the path to the 'lib' directory so custom modules 
-## can be imported reliably.
+## Import shared helpers by script location so startup works from any shell folder.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "lib"))
-
 import memoryManager as mem
 import skillLoader as skills
+from proxyClient import streamCompletion, PROXY_HEADERS, modelInfoUrl
+from tokenOptimizer import optimizeMessages
+from outputManager import (
+    ARTIFACT_PROMPT,
+    captureOutputs,
+    validChatId,
+    OUTPUT_DIR,
+    isWithinDirectory,
+)
+from systemPrompt import SYSTEM_PROMPT
 
-## The proxy endpoint details. The UI server acts as a middleman, receiving
-## web traffic from the browser and formatting it for the LiteLLM proxy.
-# ui/server.py (Around lines 31-32)
-PROXY_URL     = "http://127.0.0.1:4000/chat/completions"
-PROXY_HEADERS = {"Content-Type": "application/json", "Authorization": "Bearer sk-anything"}
-UI_DIR        = os.path.dirname(os.path.abspath(__file__))
-PORT          = 5000
+UI_DIR = os.path.dirname(os.path.abspath(__file__))
+PORT = 5000
 
-## Initializes the HTTP server on port 5000, listening to all local interfaces.
+## Serve UI assets and API requests on port 5000 until interrupted.
+## Bind port 5000 on all interfaces; this interface is for a trusted local setup.
 def runServer():
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     print(f"hazar-ai Web UI running at http://localhost:{PORT}")
     print("Press Ctrl+C to stop.")
     try: server.serve_forever()
     except KeyboardInterrupt: print("\nStopped.")
+    finally: server.server_close()
 
-## Safely attempts to parse a string into JSON. Returns an empty dictionary
-## if the format is malformed to avoid crashing the server loop.
+## Parse JSON and return an empty dictionary if parsing fails.
 def parseJsonSafe(dataStr: str) -> dict:
     if not dataStr: return {}
     try: return json.loads(dataStr)
     except Exception: return {}
 
-## The core server class that handles every incoming HTTP connection.
 class Handler(BaseHTTPRequestHandler):
 
-    ## Suppresses standard terminal access log output to keep the terminal logs
-    ## readable, avoiding a wall of "GET / HTTP 200" messages.
+    ## Skip the usual HTTP access logs to keep the terminal readable.
     def log_message(self, fmt, *args): pass
 
-    ## Helper method to format and send JSON responses back to the browser.
-    ## Automatically manages headers and CORS policy to ensure the frontend accepts it.
+    ## Send a JSON response with its content length and CORS header.
+    ## Allow browser requests across origins; there is no separate browser login here.
     def sendJson(self, data: dict, status: int = 200):
         body = json.dumps(data).encode()
         self.send_response(status)
@@ -69,12 +67,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    # --------------------------------------------------------------------------
-    # Server-Sent Events (SSE) Protocol Helpers
-    # --------------------------------------------------------------------------
-
-    ## Prepares the HTTP headers to maintain an open connection for streaming data.
-    ## The 'text/event-stream' type tells the browser to keep reading chunks indefinitely.
+    ## Open an event stream and disable response buffering.
     def sendSseHeaders(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -83,19 +76,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
 
-    ## Formats the event string according to SSE standards ("event: \n data: \n\n")
-    ## and flushes it immediately down the socket to the client.
+    # --------------------------------------------------------------------
+    # Write one event and flush it immediately.
+    # Each frame contains an event name and one data line, followed by a
+    # blank line. Token text is JSON-encoded before this method is called
+    # so embedded newlines do not split the frame.
+    # --------------------------------------------------------------------
     def writeSse(self, eventType: str, data: str):
         try:
             chunk = f"event: {eventType}\ndata: {data}\n\n"
             self.wfile.write(chunk.encode())
             self.wfile.flush()
-        except BrokenPipeError:
-            ## Safely handles the scenario where a user closes the browser tab mid-stream.
-            pass
+        except BrokenPipeError: pass
 
-    ## Handles Cross-Origin Resource Sharing (CORS) preflight requests.
-    ## This prevents the browser from blocking requests made via JavaScript.
+    ## Respond to browser CORS preflight requests.
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -103,34 +97,59 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
-    ## Routes incoming GET requests based on the URL path.
-    ## Acts as a simple static file server for the UI elements, or responds with JSON
-    ## for API read endpoints.
+    ## Route asset, skill, history, status, and safe artifact download requests.
     def do_GET(self):
         path = urlparse(self.path).path
         if path in ("/", "/index.html"): self.serveFile(os.path.join(UI_DIR, "index.html"), "text/html")
         elif path == "/style.css":       self.serveFile(os.path.join(UI_DIR, "style.css"), "text/css")
-        elif path == "/script.js":       self.serveFile(os.path.join(UI_DIR, "script.js"), "application/javascript")
-        elif path == "/api/skills":      self.sendJson({"skills": skills.listSkills()})
-        elif path == "/api/status":      self.sendJson(mem.memoryStatus())
+        elif path == "/script.js":  self.serveFile(os.path.join(UI_DIR, "script.js"), "application/javascript")
+        elif path == "/api/skills": self.sendJson({"skills": skills.listSkills()})
+        ## Inspection uses full text; the query path still applies the normal injection limit.
+        elif path == "/api/skill":
+            name = parse_qs(urlparse(self.path).query).get("name", [""])[0]
+            content = skills.loadSkill(name, fullText=True)
+            if content is None: self.sendJson({"error": "Skill not found"}, 404)
+            else:               self.sendJson({"name": name, "content": content})
+        elif path == "/api/status": self.sendJson(mem.memoryStatus())
         elif path == "/.image/logo.png": self.serveFile(os.path.join(BASE_DIR, ".image", "logo.png"), "image/png")
-
-        ## Restore history on refresh
         elif path == "/api/history":
-            history, _ = mem.loadMemory() 
+            history, _ = mem.loadMemory()
             self.sendJson({"history": history})
-
+            
+        # -------------------------------------------------------------------------------
+        # Decode the requested filename, then resolve links and check its final location.
+        # Only files inside OUTPUT_DIR are served.
+        # A sibling folder with a similar name must not pass the containment check.
+        # -------------------------------------------------------------------------------
+        elif path.startswith("/api/output/"):
+            relative = unquote(path[len("/api/output/") :])
+            target = os.path.realpath(os.path.join(OUTPUT_DIR, relative))
+            if not isWithinDirectory(target, OUTPUT_DIR) or not os.path.isfile(target):
+                self.sendJson({"error": "Output not found"}, 404)
+                return
+            self.serveFile(str(target), "application/octet-stream")
         else:
             self.send_response(404)
             self.end_headers()
 
-    ## Routes incoming POST payloads to trigger specific actions (like inference).
+    ## Validate the JSON request size and route query or memory-clear requests.
     def do_POST(self):
         path = urlparse(self.path).path
-        
-        ## Read the raw byte body from the incoming HTTP request and parse it to JSON.
-        length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(length)) if length else {}
+        try: length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            self.sendJson({"error": "Invalid length"}, 400)
+            return
+        ## Reject oversized payloads before reading them into memory.
+        if length < 0 or length > 16 * 1024 * 1024:
+            self.sendJson({"error": "Request too large"}, 413)
+            return
+        ## The API accepts a JSON object rather than a list, scalar, or broken JSON text.
+        try:
+            body = json.loads(self.rfile.read(length)) if length else {}
+            if not isinstance(body, dict): raise ValueError("Object required")
+        except (ValueError, UnicodeDecodeError):
+            self.sendJson({"error": "Invalid JSON object"}, 400)
+            return
 
         if path == "/api/query":
             self.handleQuery(body)
@@ -141,55 +160,73 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-    def getContextLimit(self, model_name: str) -> int:
-        ## Attempts to fetch the true context window size from the LiteLLM proxy.
+    ## Read model limits from the proxy; use an estimate when metadata is unavailable.
+    ## Use gateway metadata when available; fallback values are estimates.
+    def getContextLimit(self, modelName: str) -> int:
         limit = 8192
         try:
-            resp = req_lib.get("http://127.0.0.1:4000/model/info", headers=PROXY_HEADERS, timeout=2)
+            resp = req_lib.get(modelInfoUrl(), headers=PROXY_HEADERS, timeout=2)
             if resp.status_code == 200:
                 models = resp.json().get("data", [])
                 for m in models:
-                    if m.get("model_name") == model_name or m.get("id") == model_name:
+                    if m.get("model_name") == modelName or m.get("id") == modelName:
                         info = m.get("model_info", {})
-                        ## LiteLLM stores limits under different keys depending on the provider
-                        found = info.get("max_input_tokens") or m.get("max_input_tokens") or info.get("max_tokens")
+                        found = (
+                            info.get("max_input_tokens")
+                            or m.get("max_input_tokens")
+                            or info.get("max_tokens")
+                        )
                         if found: limit = int(found)
                         break
         except Exception: pass
-            
-        ## Fallback if the proxy is missing the exact data
+
+        ## Fallback values
         if limit == 8192:
-            lower_name = model_name.lower()
-            if "gemini" in lower_name: limit = 1048576
+            lower_name = modelName.lower()
+            if "gemini" in lower_name:        limit = 1048576
             elif "deepseek-r1" in lower_name: limit = 128000
-            elif "qwen" in lower_name: limit = 32768
-            
+            elif "qwen" in lower_name:        limit = 32768
+
         return limit
 
-    # --------------------------------------------------------------------------
-    # Core Proxy Passthrough Logic
-    # --------------------------------------------------------------------------
-    
-    ## Executes the main LLM interaction. Builds the conversation context, opens a stream
-    ## to the proxy server, and pipes the data chunks back to the browser in real-time.
+    ## Validate options, build context, stream a completion, and save successful results.
     def handleQuery(self, body: dict):
+        try:
+            if not isinstance(body.get("query", ""), str):  raise ValueError("Invalid query")
+            if not isinstance(body.get("files", []), list): raise ValueError("Invalid files")
+            ## Check attachment types and reject line breaks in delimiter filenames.
+            for file in body.get("files", []):
+                if (not isinstance(file, dict)
+                    or not isinstance(file.get("name"), str)
+                    or not isinstance(file.get("content"), str)):
+                    raise ValueError("Invalid file")
+                if "\n" in file["name"] or "\r" in file["name"]:
+                    raise ValueError("Invalid filename")
+            if not isinstance(body.get("model", "auto"), str) or not isinstance(body.get("skill", ""), str):
+                raise ValueError("Invalid options")
+            if body.get("maxTokens") is not None and (
+                not isinstance(body["maxTokens"], int)
+                or not 1 <= body["maxTokens"] <= 1000000):
+                raise ValueError("Invalid Max Tokens")
+            chatId = validChatId(body.get("chatId") or str(uuid.uuid4()))
+        except (ValueError, TypeError, AttributeError) as error:
+            self.sendJson({"error": str(error)}, 400)
+            return
+        
+        ## After headers are sent, query progress and errors must use stream events.
         self.sendSseHeaders()
-
-        ## Extract options defined by the web UI request payload.
-        query     = body.get("query", "").strip()
-        files     = body.get("files", []) or []
-        model     = body.get("model", "auto")
+        self.writeSse("meta", json.dumps({"chatId": chatId}))
+        query = body.get("query", "").strip()
+        files = body.get("files", []) or []
+        model = body.get("model", "auto")
         skillName = body.get("skill", "").strip() or None
-        noMemory  = body.get("noMemory", False)
+        noMemory = body.get("noMemory", False)
         maxTokens = body.get("maxTokens")
-
         if not query:
             self.writeSse("error", "Empty query.")
             return
 
-        ## Step 0: Process any attached files the same way the CLI does —
-        ## hash each one, note whether it's already cached in memory, and
-        ## append its contents to the prompt in a clearly delimited block.
+        ## Keep raw attachments for memory and add delimited text to the active query.
         fileContexts = {}
         if files:
             contextText = ""
@@ -203,140 +240,117 @@ class Handler(BaseHTTPRequestHandler):
                 fileContexts[sha] = {"path": name, "content": content}
             query += f"\n\nContext files:\n{contextText}"
 
-        ## Step 1: Build context.
-        ## Load custom skills and previous conversation memory.
+        ## Build the request in layers: skill, previous memory, then the active user query.
         messages = []
-        
         if skillName:
-            skillMsgs = skills.buildSkillMessages(skillName)
-            if skillMsgs:
+            skillMessages = skills.buildSkillMessages(skillName)
+            if skillMessages:
                 self.writeSse("log", f"Injecting skill: {skillName}")
-                messages.extend(skillMsgs)
-            else:
-                self.writeSse("log", f"WARNING: Skill '{skillName}' not found.")
+                messages.extend(skillMessages)
+            else: self.writeSse("log", f"WARNING: Skill '{skillName}' not found.")
 
         if not noMemory:
             history, _ = mem.loadMemory()
             if history:
-                turns = sum(1 for m in history if m["role"] == "user")
-                self.writeSse("log", f"Loaded {turns} chat(s) from memory.")
+                chats = sum(1 for m in history if m["role"] == "user")
+                self.writeSse("log", f"Loaded {chats} chat(s) from memory.")
                 messages.extend(history)
             else: self.writeSse("log", "No prior memory. Starting fresh.")
         else: self.writeSse("log", "Memory disabled for this query.")
-
-        ## Step 2: Append the current request and system persona instructions.
         messages.append({"role": "user", "content": query})
-        
-        ## Inject the overarching persona definition to stabilize the model's behavior.
-        system_msg = {
+
+        ## Insert shared task rules at the front so attachment instructions cannot take over.
+        systemMessage = {
             "role": "system",
-            "content": "You are Morpheus. The user is Neo. "
-            "You have perfect memory of all previous turns provided in this context. "
-            "Format your responses cleanly in Markdown. "
-            "Do not start your response with a large header."
+            "content": SYSTEM_PROMPT + "\n" + ARTIFACT_PROMPT,
         }
-        messages.insert(0, system_msg)
+        messages.insert(0, systemMessage)
+        ## Shorten supported content in a request copy; saved history stays unchanged.
+        if body.get("optimizeTokens"):
+            before = len(json.dumps(messages))
+            messages = optimizeMessages(messages)
+            self.writeSse( "log",
+                           f"Lossless optimization: {before - len(json.dumps(messages))} "
+                           "characters saved; token savings vary by tokenizer.",)
         self.writeSse("log", f"Sending to proxy (model: {model}, messages: {len(messages)})")
-        
         payload = {
             "model": model,
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
         }
-        
-        ## Only include max_tokens if explicitly requested (not toggled off)
-        if maxTokens is not None:
-            payload["max_tokens"] = int(maxTokens)
-        
+
+        ## Omitting max_tokens lets the provider use its default output limit.
+        if maxTokens is not None: payload["max_tokens"] = int(maxTokens)
         reply = ""
         actualModel = "unknown"
-        pTok = 0
-        cTok = 0
-        tTok = 0
-
-        ## Step 3: Stream data from the proxy, parse it, and pipe it down to the UI.
+        promptTokens = 0
+        completionTokens = 0
+        totalTokens = 0
         try:
-            ## Initiate a connection to the local LiteLLM proxy port.
-            resp = req_lib.post(PROXY_URL, headers=PROXY_HEADERS, json=payload, stream=True, timeout=60)
-            if resp.status_code != 200:
-                self.writeSse("error", f"Upstream proxy error: {resp.status_code}")
-                return
+            for data in streamCompletion(payload, lambda text: self.writeSse("log", text)):
 
-            ## Pluck the absolute model name from the initial headers to bypass the aliasing problem
-            ## (e.g., displaying the real model ID instead of 'fast' or 'smart').
-            actualModel = resp.headers.get("x-litellm-model-name", "unknown")
-            if actualModel != "unknown": self.writeSse("log", f"Model: {actualModel}")
-
-            ## Read the raw byte stream from the proxy line by line.
-            for line in resp.iter_lines():
-                if not line: continue
-                lineStr = line.decode("utf-8")
-                if not lineStr.startswith("data: "): continue
-                dataStr = lineStr[6:]
-                if dataStr == "[DONE]": break
-                data = parseJsonSafe(dataStr)
-                if not data: continue
-
-                ## Fallback check if headers missed the model name.
+                ## Keep the real deployment name instead of replacing it with a tier alias.
                 if "model" in data and isinstance(data["model"], str):
-                    reported_model = data["model"]
-                    if reported_model not in ("auto", "fast", "smart") and actualModel == "unknown":
-                        actualModel = reported_model
+                    reportedModel = data["model"]
+                    if (reportedModel not in ("auto", "fast", "smart") and actualModel == "unknown"):
+                        actualModel = reportedModel
                         self.writeSse("log", f"Model: {actualModel}")
 
-                ## Capture token utilization metrics sent in the final stream chunk.
+                ## The final gateway event may carry the only token usage report.
                 if "usage" in data and data["usage"]:
-                    u    = data["usage"]
-                    pTok = u.get("prompt_tokens", pTok)
-                    cTok = u.get("completion_tokens", cTok)
-                    tTok = u.get("total_tokens", tTok)
+                    u = data["usage"]
+                    promptTokens = u.get("prompt_tokens", promptTokens)
+                    completionTokens = u.get("completion_tokens", completionTokens)
+                    totalTokens = u.get("total_tokens", totalTokens)
 
-                ## Extract the delta text fragment and forward it to the browser.
                 choices = data.get("choices", [])
                 if choices:
                     delta = choices[0].get("delta", {})
                     token = delta.get("content", "")
                     if token:
+                        ## JSON encoding keeps newlines inside the text from breaking SSE frames.
                         reply += token
                         self.writeSse("token", json.dumps(token))
-            
-            ## Post-generation cleanup: save the final conversation back to the memory manager.
+
+            ## File capture runs only after the gateway confirms a complete response.
+            if reply: self.writeSse("artifacts", json.dumps(captureOutputs(reply, chatId)))
+
+            ## Disabled memory skips saving the chat but still allows output files.
             if not noMemory and reply:
-                mem.appendTurn(query, reply, fileContexts if fileContexts else None)
+                mem.appendChat(query, reply, fileContexts if fileContexts else None)
                 self.writeSse("log", "Chat saved to memory.")
 
-            ## Calculate estimates if usage stats are missing from the provider API,
-            ## ensuring the UI progress bar still functions roughly.
-            if tTok == 0 and reply:
-                cTok = int(len(reply.split()) * 1.3)
-                pTok = int(len(query.split()) * 1.3)
-                tTok = pTok + cTok
+            ## Use rough counts when the provider omits usage; these are not exact token totals.
+            if totalTokens == 0 and reply:
+                completionTokens = int(len(reply.split()) * 1.3)
+                promptTokens = max(1, len(json.dumps(messages, ensure_ascii=False).encode("utf-8")) // 4,)
+                totalTokens = promptTokens + completionTokens
+                
+            contextLimit = self.getContextLimit(actualModel)
+            ## The done event ends generation and updates the browser usage bar.
+            self.writeSse(
+                "done",
+                json.dumps(
+                    {
+                        "model": actualModel,
+                        "promptTokens": promptTokens,
+                        "completionTokens": completionTokens,
+                        "totalTokens": totalTokens,
+                        "contextLimit": contextLimit,
+                    }
+                ),
+            )
 
-            ## Fetch the true context limit from the LiteLLM proxy
-            context_limit = self.getContextLimit(actualModel)
+        ## Send failures as stream events so the browser can restore the request for retry.
+        except Exception as e: self.writeSse("error", str(e))
 
-            ## Finalize the stream and push statistics as a final 'done' event.
-            self.writeSse("done", json.dumps({
-                "model": actualModel,
-                "promptTokens": pTok,
-                "completionTokens": cTok,
-                "totalTokens": tTok,
-                "contextLimit": context_limit
-            }))
-
-        except Exception as e:
-            ## Trap any socket errors or parsing failures and log them directly to the UI panel.
-            self.writeSse("error", str(e))
-
-    ## Reads a local file from disk and streams it directly to the HTTP socket.
-    ## Used primarily to serve the static frontend assets (HTML, JS, CSS).
+    ## Send a local file as bytes with the requested content type.
     def serveFile(self, path: str, mimeType: str):
         if not os.path.exists(path):
             self.send_response(404)
             self.end_headers()
             return
-            
         with open(path, "rb") as f: data = f.read()
         self.send_response(200)
         self.send_header("Content-Type", mimeType)

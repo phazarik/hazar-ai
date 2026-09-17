@@ -1,17 +1,19 @@
-# ------------------------------------------------------------
-# Points the Continue VSCode extension at the local litellm
-# proxy. The real file lives here in ~/.ai-setup/; Continue
-# finds it because of a symlink at ~/.continue/config.yaml
-# pointing back to this file (Continue insists on that exact
-# folder, so the symlink is the workaround).
+# ----------------------------------------------------------------------------
+# Continue reference settings
 #
-# After editing this file, reload the VSCode window for the
-# change to show up in Continue's model picker.
-# ------------------------------------------------------------
+# Shows how Continue connects to the local compatible gateway.
+# setup.py writes the actual file to ~/.continue/config.yaml.
+# The gateway credential comes from ~/.continue/.env.
+# ----------------------------------------------------------------------------
+
+name: hazar-ai
+version: 1.0.0
+schema: v1
 
 models:
   - name: local-router
     provider: openai
-    model: auto              ## let router_hook.py decide fast vs smart
+    model: auto  # Let the gateway choose fast or smart.
     apiBase: http://localhost:4000
-    apiKey: sk-anything      ## only needs to match LITELLM_MASTER_KEY for real if that's set
+    # Read the stored gateway secret instead of copying provider keys here.
+    apiKey: ${{ secrets.LITELLM_MASTER_KEY }}

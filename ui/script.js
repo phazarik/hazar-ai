@@ -1,13 +1,20 @@
-// =============================================================================
-// Frontend Logic Core
-// =============================================================================
+// ----------------------------------------------------------------------------
+// Browser interface logic
+//
+// This connects page controls to Python and renders streaming replies.
+// Handles attachments, model/skill choices, memory controls, and resizing.
+// Markdown is cleaned before insertion; skill inspection stays plain text.
+// Failed or stopped requests restore the prompt and queued attachments.
+// ----------------------------------------------------------------------------
 
 // Configure Markdown parser safely (render LaTeX math equations natively)
 if (typeof marked !== "undefined" && typeof window.markedKatex === "function") {
-    marked.use(window.markedKatex({
-        throwOnError: false,
-        output: 'html'
-    }));
+    marked.use(
+        window.markedKatex({
+            throwOnError: false,
+            output: "html",
+        }),
+    );
 }
 
 // Global variables to hold the state of the application.
@@ -16,27 +23,28 @@ let attachedFileContents = [];
 let selectedModel = "auto";
 let optimizeTokens = false;
 let memoryEnabled = true;
+let visualHistoryCleared = false;
+let currentChatId = crypto.randomUUID();
 
 // State variables specifically for managing the LLM text generation
-let currentAbortController = null; // Allows us to cancel an ongoing network request
-let isGenerating = false;          // Acts as a lock so we don't send multiple requests at once
-let isManuallyResized = false;     // Tracks if the user dragged the text box to a custom size
+let currentAbortController = null; // Cancels the active network request
+let isGenerating = false; // Prevents simultaneous submissions
+let isManuallyResized = false; // Tracks if the user dragged the text box to a custom size
 
 // -----------------------------------------------------------------------------
 // DOMContentLoaded Event
-// Think of this like 'if __name__ == "__main__":' in Python. 
-// It ensures the browser has fully read the HTML file and built the webpage 
-// structure (the DOM) before we try to attach scripts or find elements.
+// Register event handlers after the document is ready.
+// It ensures the browser has fully read the HTML file and built the webpage
+// structure (the DOM) before event handlers access its elements.
 // -----------------------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", () => {
-    
     // --- File Attachment Logic ---
     // 'document.getElementById' grabs an HTML element by its ID.
     // 'addEventListener' tells the browser to run a function when a specific action happens.
     document.getElementById("fileInput").addEventListener("change", attachFiles);
-    
-    // We hide the actual ugly HTML <input type="file"> and use a nice styled button instead.
-    // When the nice button is clicked, we use JavaScript to silently click the hidden input.
+
+    // The attachment button opens the hidden file input.
+
     document.getElementById("attachBtn").addEventListener("click", () => {
         document.getElementById("fileInput").click();
     });
@@ -44,11 +52,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- Drag & Drop Logic ---
     // This allows users to drag files from their desktop onto the app.
     const dropZone = document.querySelector(".app");
-    let dragCounter = 0; // Helps track if we drag over nested elements
+    let dragCounter = 0; // Tracks nested drag targets
 
-    // 'e.preventDefault()' stops the browser's default behavior. 
+    // 'e.preventDefault()' stops the browser's default behavior.
     // By default, a browser tries to open a dropped file (like a PDF or image) in a new tab.
-    // We prevent that so we can read it into our chat instead.
+
     dropZone.addEventListener("dragenter", (e) => {
         e.preventDefault();
         dragCounter++;
@@ -69,14 +77,13 @@ document.addEventListener("DOMContentLoaded", () => {
         e.preventDefault();
         dragCounter = 0;
         dropZone.classList.remove("drag-active");
-        
-        // If files were dropped, pass them to our processing function
+
         if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             addFiles(e.dataTransfer.files);
         }
     });
 
-    // -ending Queries ---
+    // --- Send and Stop actions ---
     document.getElementById("sendBtn").addEventListener("click", () => {
         if (isGenerating) {
             // If the bot is currently typing, the button acts as a "Stop" button.
@@ -101,22 +108,25 @@ document.addEventListener("DOMContentLoaded", () => {
     const TEXTAREA_MAX_HEIGHT = 260;
     const autoGrowInput = () => {
         if (isManuallyResized) return; // Ignore auto-grow if the user manually dragged the box height
-        
+
         // Temporarily reset height to calculate the true required height (scrollHeight)
-        queryInput.style.height = "auto"; 
+        queryInput.style.height = "auto";
         const next = Math.min(queryInput.scrollHeight, TEXTAREA_MAX_HEIGHT);
         queryInput.style.height = `${next}px`;
-        
-        // Add a scrollbar only if the text exceeds our maximum height
-        queryInput.style.overflowY = queryInput.scrollHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
+
+        queryInput.style.overflowY =
+            queryInput.scrollHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
     };
     queryInput.addEventListener("input", autoGrowInput);
     queryInput.addEventListener("paste", () => setTimeout(autoGrowInput, 0));
 
     // --- Resize Handles (Mouse & Touch Helpers) ---
     // Extracts coordinates seamlessly whether via standard mouse or touchscreen
-    const getClientY = (e) => e.touches ? e.touches[0].clientY : e.clientY;
-    const getClientX = (e) => e.touches ? e.touches[0].clientX : e.clientX;
+    // Pointer events can come from a mouse or touchscreen.
+    // Read touch coordinates when available, otherwise use mouse coordinates.
+    // Both resize handlers can then share the same position calculations.
+    const getClientY = (e) => (e.touches ? e.touches[0].clientY : e.clientY);
+    const getClientX = (e) => (e.touches ? e.touches[0].clientX : e.clientX);
 
     // --- Manual Resize Handle (Text Box) ---
     // Allows the user to click and drag the divider to make the text input larger.
@@ -127,17 +137,19 @@ document.addEventListener("DOMContentLoaded", () => {
         let startY = 0;
         let startHeight = 0;
 
+        // Measure movement from the initial drag point, not the last event.
+        // Clamp the input height so the prompt box cannot collapse completely.
         const onChatPointerMove = (e) => {
             if (!draggingChat) return;
-            const delta = startY - getClientY(e); 
+            const delta = startY - getClientY(e);
             const newHeight = Math.max(50, startHeight + delta); // Enforce minimum height
-            
+
             queryInput.style.height = `${newHeight}px`;
             isManuallyResized = true; // Lock out the auto-grow feature
         };
         const stopChatDragging = () => {
             draggingChat = false;
-            document.body.classList.remove("resizing-chat"); 
+            document.body.classList.remove("resizing-chat");
         };
 
         const startChatDrag = (e) => {
@@ -147,17 +159,21 @@ document.addEventListener("DOMContentLoaded", () => {
             document.body.classList.add("resizing-chat"); // Prevents text selection while dragging
             if (!e.touches) e.preventDefault(); // Don't prevent default on touch to avoid passive listener warnings
         };
-        
+
         chatResizeHandle.addEventListener("mousedown", startChatDrag);
-        chatResizeHandle.addEventListener("touchstart", startChatDrag, { passive: true });
-        
+        chatResizeHandle.addEventListener("touchstart", startChatDrag, {
+            passive: true,
+        });
+
         document.addEventListener("mousemove", onChatPointerMove);
-        document.addEventListener("touchmove", onChatPointerMove, { passive: true });
-        
+        document.addEventListener("touchmove", onChatPointerMove, {
+            passive: true,
+        });
+
         document.addEventListener("mouseup", stopChatDragging);
         document.addEventListener("touchend", stopChatDragging);
     }
-    
+
     // --- Manual Resize Handle (Side Panel) ---
     // Resizes the right diagnostic panel horizontally on desktop, or vertically on mobile
     const panelResizeHandle = document.getElementById("panelResizeHandle");
@@ -170,18 +186,21 @@ document.addEventListener("DOMContentLoaded", () => {
         let startWidth = 0;
         let startHeight = 0;
 
+        // Desktop dragging changes width; mobile dragging changes height.
+        // Use the matching axis after the layout switches to stacked panels.
+        // Size limits keep both chat and diagnostics usable.
         const onPanelPointerMove = (e) => {
             if (!draggingPanel) return;
-            
+
             // Check if the CSS media query condition applies (mobile breakpoint)
             const isMobile = window.innerWidth <= 768;
-            
+
             if (isMobile) {
                 // Stacked vertically: dragging UP means larger right panel
                 const delta = startY - getClientY(e);
                 const newHeight = Math.max(100, startHeight + delta);
                 rightPanel.style.height = `${newHeight}px`;
-                rightPanel.style.width = ""; // Reset width override 
+                rightPanel.style.width = ""; // Reset width override
             } else {
                 // Side-by-side: dragging LEFT means larger right panel
                 const delta = startX - getClientX(e);
@@ -208,22 +227,28 @@ document.addEventListener("DOMContentLoaded", () => {
         };
 
         panelResizeHandle.addEventListener("mousedown", startPanelDrag);
-        panelResizeHandle.addEventListener("touchstart", startPanelDrag, { passive: true });
+        panelResizeHandle.addEventListener("touchstart", startPanelDrag, {
+            passive: true,
+        });
 
         document.addEventListener("mousemove", onPanelPointerMove);
-        document.addEventListener("touchmove", onPanelPointerMove, { passive: true });
-        
+        document.addEventListener("touchmove", onPanelPointerMove, {
+            passive: true,
+        });
+
         document.addEventListener("mouseup", stopPanelDragging);
         document.addEventListener("touchend", stopPanelDragging);
     }
 
     // --- Toolbar Buttons ---
-    
+
     // Model Selector: Loop through all buttons with a 'data-model' attribute
     document.querySelectorAll(".tool-group button[data-model]").forEach((btn) => {
         btn.addEventListener("click", (e) => {
             // Remove 'active' class from all buttons, then add it to the clicked one
-            document.querySelectorAll(".tool-group button[data-model]").forEach(b => b.classList.remove("active"));
+            document
+                .querySelectorAll(".tool-group button[data-model]")
+                .forEach((b) => b.classList.remove("active"));
             e.currentTarget.classList.add("active");
             selectedModel = e.currentTarget.getAttribute("data-model");
         });
@@ -266,7 +291,10 @@ document.addEventListener("DOMContentLoaded", () => {
     optBtn.addEventListener("click", () => {
         optimizeTokens = !optimizeTokens; // Flip the boolean state
         optBtn.classList.toggle("active", optimizeTokens); // Update UI
-        optBtn.innerHTML = `<i class="bi bi-lightning-charge"></i> <span class="btn-text">Optimize: ${optimizeTokens ? "ON" : "OFF"}</span>`;
+        const optimizationLabel = optimizeTokens ? "ON" : "OFF";
+        optBtn.innerHTML =
+            '<i class="bi bi-lightning-charge"></i> ' +
+            `<span class="btn-text">Optimize: ${optimizationLabel}</span>`;
     });
 
     // Memory Toggle
@@ -276,52 +304,83 @@ document.addEventListener("DOMContentLoaded", () => {
         memBtn.classList.toggle("active", memoryEnabled);
         memBtn.innerHTML = `<i class="bi bi-cpu"></i> <span class="btn-text">Memory: ${memoryEnabled ? "ON" : "OFF"}</span>`;
     });
-    
+
     // Memory Status Check
     const memStatusBtn = document.getElementById("memStatusBtn");
     if (memStatusBtn) {
         memStatusBtn.addEventListener("click", () => {
             fetch("/api/status")
-                .then(res => res.json())
-                .then(data => {
-                    appendLog(`Status | Turns: ${data.turns}, Summary: ${data.summaryChars} chars, Cached Files: ${data.cachedFiles}`);
+                .then((res) => res.json())
+                .then((data) => {
+                    appendLog(
+                        `Status | Chats: ${data.chats}, Summary: ${data.summaryChars} chars, Cached Files: ${data.cachedFiles}`,
+                    );
                 })
-                .catch(err => appendLog("Failed to fetch memory status.", true));
+                .catch((err) => appendLog("Failed to fetch memory status.", true));
         });
     }
+
+    // Clear Chat affects the displayed bubbles only; persistent memory stays intact.
+    document.getElementById("clearChatBtn").addEventListener("click", () => {
+        visualHistoryCleared = true;
+        document.getElementById("history").replaceChildren();
+        appendLog("Displayed chat cleared. Memory retained.");
+    });
 
     // Clear Memory Button ---
     const clearBtn = document.getElementById("clearMemoryBtn");
     if (clearBtn) {
         clearBtn.addEventListener("click", () => {
+            if (isGenerating) return;
             // Ask for confirmation before wiping everything
             if (confirm("Are you sure you want to delete all chat history?")) {
-                
                 // Send a POST request to the existing backend endpoint
-                fetch("/api/clear", { method: "POST" })
-                    .then(res => res.json())
-                    .then(data => {
+                fetch("/api/clear", {
+                    method: "POST",
+                })
+                    .then((res) => res.json())
+                    .then((data) => {
                         if (data.ok) {
+                            visualHistoryCleared = true;
                             // Wipe the visual chat bubbles from the screen
                             document.getElementById("history").innerHTML = "";
                             appendLog("Memory wiped successfully.");
                         }
                     })
-                    .catch(err => appendLog("Failed to clear backend memory.", true));
+                    .catch((err) => appendLog("Failed to clear backend memory.", true));
             }
         });
     }
 
     // Fetch available skills dynamically from the Python server API
-    const DEFAULT_SKILL = "prompt-master";
+    const DEFAULT_SKILL = "";
     const skillSelector = document.getElementById("skillSelector");
+    // Inspection reads the complete expanded skill and displays it as plain text.
+    document.getElementById("viewSkillBtn").addEventListener("click", async () => {
+        const name = document.getElementById("skillSelector").value;
+        if (!name) {
+            appendLog("Select a skill before inspection.");
+            return;
+        }
+        try {
+            const response = await fetch(`/api/skill?name=${encodeURIComponent(name)}`);
+            const skill = await response.json();
+            if (!response.ok) throw new Error(skill.error || "Skill inspection failed");
+            document.getElementById("skillDialogTitle").textContent = skill.name;
+            document.getElementById("skillDialogText").textContent = skill.content;
+            document.getElementById("skillDialog").showModal();
+        } catch (error) {
+            appendLog(error.message, true);
+        }
+    });
+
     if (skillSelector) {
         // 'fetch' makes an HTTP request. '.then()' handles the asynchronous response.
         fetch("/api/skills")
-            .then(res => res.json()) // Parse the raw response into a JSON object
-            .then(data => {
+            .then((res) => res.json()) // Parse the raw response into a JSON object
+            .then((data) => {
                 if (data.skills) {
-                    data.skills.forEach(skill => {
+                    data.skills.forEach((skill) => {
                         // Create a new dropdown option for each skill found
                         const opt = document.createElement("option");
                         opt.value = skill;
@@ -334,29 +393,32 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                 }
             })
-            .catch(err => appendLog("Failed to load available system skills.", true));
+            .catch((err) => appendLog("Failed to load available system skills.", true));
     }
 
     // --- Restore visual chat history ---
-    // Make a GET request to our new Python endpoint
+    // Read saved history from the backend.
     fetch("/api/history")
-        .then(res => res.json())
-        .then(data => {
-            if (data.history && data.history.length > 0) {
-                data.history.forEach(msg => {
+        .then((res) => res.json())
+        .then((data) => {
+            if (!visualHistoryCleared && data.history && data.history.length > 0) {
+                data.history.forEach((msg) => {
                     // Skip 'system' messages (like the memory summaries or Morpheus instructions)
                     if (msg.role === "system") return;
-                    
+
                     // The backend saves roles as 'user' and 'assistant'
                     // The frontend CSS expects 'neo' and 'morpheus'
                     const displayRole = msg.role === "assistant" ? "morpheus" : "neo";
                     const msgBox = createMsgBox(displayRole);
-                    
+
                     if (displayRole === "morpheus") {
                         // If it's the AI, parse the markdown and sanitize it
+                        // Markdown can contain HTML, so never insert the parser result directly.
+                        // DOMPurify removes unsafe markup before it reaches the message box.
                         const parsedHTML = marked.parse(msg.content);
-                        msgBox.innerHTML = window.DOMPurify ? DOMPurify.sanitize(parsedHTML) : parsedHTML;
-                        
+                        if (window.DOMPurify) msgBox.innerHTML = DOMPurify.sanitize(parsedHTML);
+                        else msgBox.textContent = msg.content;
+
                         // Apply syntax highlighting to code blocks
                         msgBox.querySelectorAll("pre code").forEach((block) => {
                             hljs.highlightElement(block);
@@ -366,15 +428,14 @@ document.addEventListener("DOMContentLoaded", () => {
                         msgBox.textContent = msg.content;
                     }
                 });
-                
+
                 // Jump to the bottom of the chat after everything loads
                 const historyContainer = document.getElementById("history");
                 historyContainer.scrollTop = historyContainer.scrollHeight;
             }
         })
-        .catch(err => console.log("No previous history found or error loading."));
+        .catch((err) => console.log("No previous history found or error loading."));
 });
-
 
 // -----------------------------------------------------------------------------
 // File Processing Functions
@@ -382,17 +443,71 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // A set of allowed file extensions to prevent reading heavy binary files (like .png or .zip) as text.
 const TEXT_FILE_EXTENSIONS = new Set([
-    "txt", "md", "markdown", "json", "yaml", "yml", "toml", "ini", "cfg", "conf",
-    "py", "js", "jsx", "ts", "tsx", "html", "htm", "css", "scss", "sass",
-    "sh", "bash", "zsh", "ps1", "bat",
-    "c", "h", "cpp", "hpp", "cc", "cs", "java", "kt", "go", "rs", "rb", "php",
-    "sql", "xml", "csv", "tsv", "log", "env", "gitignore", "dockerfile",
-    "vue", "svelte", "r", "swift", "scala", "lua", "pl", "gradle", "makefile"
+    "txt",
+    "md",
+    "markdown",
+    "json",
+    "yaml",
+    "yml",
+    "toml",
+    "ini",
+    "cfg",
+    "conf",
+    "py",
+    "js",
+    "jsx",
+    "ts",
+    "tsx",
+    "html",
+    "htm",
+    "css",
+    "scss",
+    "sass",
+    "sh",
+    "bash",
+    "zsh",
+    "ps1",
+    "bat",
+    "c",
+    "h",
+    "cpp",
+    "hpp",
+    "cc",
+    "cs",
+    "java",
+    "kt",
+    "go",
+    "rs",
+    "rb",
+    "php",
+    "sql",
+    "xml",
+    "csv",
+    "tsv",
+    "log",
+    "env",
+    "gitignore",
+    "dockerfile",
+    "vue",
+    "svelte",
+    "r",
+    "swift",
+    "scala",
+    "lua",
+    "pl",
+    "gradle",
+    "makefile",
 ]);
 
+// Check text MIME types first, then known source-file extensions.
 function isLikelyTextFile(file) {
     if (file.type && file.type.startsWith("text/")) return true;
-    if (file.type === "application/json" || file.type === "application/javascript" || file.type === "application/xml") return true;
+    if (
+        file.type === "application/json" ||
+        file.type === "application/javascript" ||
+        file.type === "application/xml"
+    )
+        return true;
     const ext = file.name.includes(".") ? file.name.split(".").pop().toLowerCase() : "";
     return TEXT_FILE_EXTENSIONS.has(ext);
 }
@@ -400,13 +515,13 @@ function isLikelyTextFile(file) {
 // Updates the little list of attached files shown above the text box
 function renderFileList() {
     const list = document.getElementById("fileList");
-    list.textContent = ""; 
-    
+    list.textContent = "";
+
     if (attachedFileContents.length === 0) {
         list.textContent = "NO FILES ATTACHED.";
         return;
     }
-    
+
     attachedFileContents.forEach((f, idx) => {
         // Create a visual "chip" for each file
         const chip = document.createElement("span");
@@ -430,6 +545,8 @@ function renderFileList() {
 }
 
 // Reads files sequentially from the user's hard drive into browser memory
+// Read likely text files and keep each name with its decoded contents.
+// FileReader finishes asynchronously, so update chips after each read.
 function addFiles(fileList) {
     const incoming = Array.from(fileList);
     const rejected = [];
@@ -439,13 +556,16 @@ function addFiles(fileList) {
             rejected.push(file.name);
             return;
         }
-        
+
         // FileReader is a built-in API to read local files.
         // It operates asynchronously so it doesn't freeze the UI on huge files.
         const reader = new FileReader();
         reader.onload = (e) => {
             // This runs when the file finishes loading
-            attachedFileContents.push({ name: file.name, content: e.target.result });
+            attachedFileContents.push({
+                name: file.name,
+                content: e.target.result,
+            });
             renderFileList();
         };
         reader.onerror = () => appendLog(`Failed to read file: ${file.name}`, true);
@@ -457,12 +577,12 @@ function addFiles(fileList) {
     }
 }
 
+// Pass the native input selection to the shared attachment reader.
 function attachFiles(event) {
     addFiles(event.target.files);
     // Reset the input value so selecting the exact same file twice in a row still fires the 'change' event
-    event.target.value = ""; 
+    event.target.value = "";
 }
-
 
 // -----------------------------------------------------------------------------
 // UI Utilities
@@ -473,48 +593,53 @@ function appendLog(text, isError = false) {
     const logs = document.getElementById("logs");
     const entry = document.createElement("div");
     entry.className = "log-entry";
-    
+
     if (isError) entry.style.color = "red";
-    
-    const now = new Date().toLocaleTimeString('en-US', { hour12: false });
+
+    const now = new Date().toLocaleTimeString("en-US", {
+        hour12: false,
+    });
     entry.textContent = `[${now}] ${text}`;
-    
+
     logs.appendChild(entry);
     logs.scrollTop = logs.scrollHeight; // Auto-scroll logs to bottom
 }
 
 // Builds the HTML structure for a new message bubble (either user or AI) in the main chat history.
+// Create one message container and return its content element for rendering.
 function createMsgBox(role) {
     const history = document.getElementById("history");
     const div = document.createElement("div");
     div.className = `msg ${role}`;
-    
+
     const label = document.createElement("div");
     label.className = "msg-label";
-    
-    const now = new Date().toLocaleTimeString('en-US', { hour12: false });
+
+    const now = new Date().toLocaleTimeString("en-US", {
+        hour12: false,
+    });
     label.innerHTML = `<span class="role-name">> ${role.toUpperCase()}</span> <span class="time-tag">[${now}]</span>`;
-    
+
     const content = document.createElement("div");
     content.className = "msg-content";
-    
+
     div.appendChild(label);
     div.appendChild(content);
     history.appendChild(div);
-    
-    history.scrollTop = history.scrollHeight;
-    
-    return content; // Return the empty content div so we can inject text into it later
-}
 
+    history.scrollTop = history.scrollHeight;
+
+    return content; // Return the content element for later streamed text
+}
 
 // -----------------------------------------------------------------------------
 // Core Network Handler & SSE Stream Management
 // -----------------------------------------------------------------------------
 
-// We use 'async' so we can use 'await' inside. This allows us to pause execution 
-// waiting for the network without freezing the browser tab.
+// Send the request and read its stream without blocking page interaction.
 async function sendQuery() {
+    const queryInput = document.getElementById("queryInput");
+    if (isGenerating) return;
     const sendBtn = document.getElementById("sendBtn");
     const attachBtn = document.getElementById("attachBtn");
     const bufferIcon = document.getElementById("loadingBuffer");
@@ -522,9 +647,9 @@ async function sendQuery() {
     const historyContainer = document.getElementById("history");
     const limitTokensToggle = document.getElementById("limitTokensToggle");
     const maxTokensInput = document.getElementById("maxTokensInput");
-    
+
     const query = queryInput.value.trim();
-    
+
     // Do nothing if there's no text and no files attached
     if (!query && attachedFileContents.length === 0) return;
 
@@ -533,11 +658,11 @@ async function sendQuery() {
     const neoBox = createMsgBox("neo");
     neoBox.textContent = query;
     queryInput.value = "";
-    
+
     // Reset the text box size to normal
-    isManuallyResized = false; 
-    queryInput.style.height = "120px"; 
-    
+    isManuallyResized = false;
+    queryInput.style.height = "120px";
+
     // Lock the UI so the user can't send overlapping requests
     isGenerating = true;
     currentAbortController = new AbortController(); // Used to cancel the fetch request if "Stop" is clicked
@@ -545,20 +670,21 @@ async function sendQuery() {
     attachBtn.disabled = true;
     sendBtn.innerHTML = `<i class="bi bi-stop-circle"></i> <span class="btn-text">Stop</span>`;
     if (bufferIcon) bufferIcon.style.display = "inline-block";
-    
+
     // Prep the files to be sent to Python
     const filesPayload = attachedFileContents.map((f) => {
         let content = f.content;
-        if (optimizeTokens) {
-            // Clean out empty lines to save context limits
-            content = content.split("\n")
-                .map(line => line.trimEnd())
-                .filter(line => line.length > 0)
-                .join("\n");
-        }
-        return { name: f.name, content };
+        // Keep attachment text unchanged here.
+        // Safe JSON shortening and deduplication run on the Python backend.
+        return {
+            name: f.name,
+            content,
+        };
     });
-    
+
+    // Keep a separate attachment copy while the request runs.
+    // Error paths restore it so retrying does not lose attached files.
+    const queuedFiles = attachedFileContents.slice();
     attachedFileContents = []; // Clear attachments now that they are queued for sending
     renderFileList();
 
@@ -566,128 +692,167 @@ async function sendQuery() {
 
     // --- Network Request ---
     try {
-        // We use fetch to hit our Python server. 
-        // We pass the AbortController's signal so we can kill the request mid-flight.
         const resp = await fetch("/api/query", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            signal: currentAbortController.signal, 
-            body: JSON.stringify({ 
-                query: query, 
+            headers: {
+                "Content-Type": "application/json",
+            },
+            signal: currentAbortController.signal,
+            body: JSON.stringify({
+                query: query || "Analyze the attached files.",
+                chatId: currentChatId,
+                optimizeTokens: optimizeTokens,
                 files: filesPayload,
-                model: selectedModel, 
+                model: selectedModel,
                 noMemory: !memoryEnabled,
                 skill: skillSelector ? skillSelector.value : "",
-                maxTokens: (limitTokensToggle && limitTokensToggle.checked) ? parseInt(maxTokensInput.value) : null
-            })
+                maxTokens:
+                    limitTokensToggle && limitTokensToggle.checked
+                        ? parseInt(maxTokensInput.value)
+                        : null,
+            }),
         });
-        
+
         // --- Server-Sent Events (SSE) Parsing ---
-        // Instead of waiting for one giant response block, we read the response as a stream of chunks.
+
+        if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
         const reader = resp.body.getReader();
+        let terminalEvent = false;
+        // HTTP chunks do not always line up with SSE event boundaries.
+        // The decoder preserves split UTF-8 characters; buffer keeps partial events.
+        // Only frames ending in a blank line are parsed during the read loop.
         const decoder = new TextDecoder();
         let reply = "";
         let buffer = "";
-        
+
         // This loop runs continuously as long as the server is sending chunks of text
         while (true) {
             const { done, value } = await reader.read();
             if (done) break; // Exit loop when stream is finished
-            
-            // Decode the raw bytes into text and add it to our buffer
-            buffer += decoder.decode(value, { stream: true });
-            
+
+            // Decode the raw bytes into text and append it to the event buffer
+            buffer += decoder.decode(value, {
+                stream: true,
+            });
+
             // SSE chunks are separated by double newlines (\n\n)
             const parts = buffer.split("\n\n");
             buffer = parts.pop(); // Keep the last incomplete chunk in the buffer for the next loop
-            
+
             parts.forEach((part) => {
                 const lines = part.split("\n");
                 let eventType = "message";
                 let data = "";
-                
+
                 // Parse standard SSE format: "event: [type]\ndata: [content]"
                 lines.forEach((line) => {
                     if (line.startsWith("event: ")) eventType = line.slice(7).trim();
                     if (line.startsWith("data: ")) data = line.slice(6);
                 });
-                
+
                 if (!data) return;
 
                 // --- Handle Event Types ---
-                
-                if (eventType === "log") {
+
+                if (eventType === "meta") currentChatId = JSON.parse(data).chatId;
+                else if (eventType === "artifacts") {
+                    const manifest = JSON.parse(data);
+                    const links = manifest.artifacts || [];
+                    if (links.length === 0) return;
+                    const downloads = document.createElement("div");
+                    downloads.className = "output-downloads";
+                    links.forEach((file) => {
+                        const link = document.createElement("a");
+                        link.href = file.url;
+                        link.download = file.name.split("/").pop();
+                        link.textContent = `Download ${file.name}`;
+                        downloads.appendChild(link);
+                    });
+                    morpheusBox.parentElement.appendChild(downloads);
+                    appendLog(`Outputs: output/${manifest.chatId}/${manifest.requestId}`);
+                } else if (eventType === "log") {
                     appendLog(data); // Route backend logs straight to the UI log panel
-                }
-                else if (eventType === "token") {
+                } else if (eventType === "token") {
                     try {
                         reply += JSON.parse(data);
+                    } catch (e) {
+                        reply += data;
                     }
-                    catch (e) {
-                        reply += data; 
-                    }
-                    
-                    // Smart Auto-Scroll: Only force the scrollbar down if the user is already at the bottom.
-                    // If they scrolled up to read history, don't interrupt them.
-                    const isAtBottom = historyContainer.scrollHeight - historyContainer.scrollTop <= historyContainer.clientHeight + 50;
-                    
+
+                    // Follow new text only while history is already near the bottom.
+                    // Reading an older message should not force a jump back down.
+                    const isAtBottom =
+                        historyContainer.scrollHeight - historyContainer.scrollTop <=
+                        historyContainer.clientHeight + 50;
+
                     // Convert Markdown to HTML
                     const parsedHTML = marked.parse(reply);
-                    
+
                     // Clean the HTML using DOMPurify to prevent malicious script injection.
                     morpheusBox.innerHTML = DOMPurify.sanitize(parsedHTML);
-                    
+
                     if (isAtBottom) {
                         historyContainer.scrollTop = historyContainer.scrollHeight;
                     }
-                }
-		else if (eventType === "done") {
+                } else if (eventType === "done") {
+                    terminalEvent = true;
                     // Apply syntax highlighting to code blocks only once at the very end
                     morpheusBox.querySelectorAll("pre code").forEach((block) => {
                         hljs.highlightElement(block);
                     });
 
-                    // Update token usage bar to show FREE tokens based on true context limits
+                    // Update token usage bar to show remaining tokens based on the reported or estimated context limit
                     try {
                         const stats = JSON.parse(data);
                         const limit = stats.contextLimit || 8192;
                         const used = stats.totalTokens || 0; // Tracks both prompt and completion tokens
-                        
+
                         const free = Math.max(0, limit - used);
                         const pct = limit > 0 ? Math.min(100, (used / limit) * 100).toFixed(1) : 0;
-                        
+
                         // Update the text and the progress bar fill
-                        document.getElementById("statsText").textContent = `Model: ${stats.model} | Free Tokens: ${free.toLocaleString()} (${pct}% used)`;
+                        document.getElementById("statsText").textContent =
+                            `Model: ${stats.model} | Free Tokens: ${free.toLocaleString()} (${pct}% used)`;
                         document.getElementById("tokBarFill").style.width = `${pct}%`;
-                    }
-                    catch(err) {
+                    } catch (err) {
                         appendLog("Failed to parse runtime stats", true);
                     }
-                }
-                else if (eventType === "error") {
+                } else if (eventType === "error") {
+                    terminalEvent = true;
                     appendLog(`ERROR: ${data}`, true);
+                    if (!reply) morpheusBox.textContent = `Generation failed: ${data}`;
+                    queryInput.value = query;
+                    attachedFileContents = queuedFiles;
+                    renderFileList();
                 }
             });
         }
-    }
-    catch(e) {
+        // A stream without done/error is incomplete even if some text arrived.
+        if (!terminalEvent) throw new Error("Stream ended before completion.");
+    } catch (e) {
+        queryInput.value = query;
+        attachedFileContents = queuedFiles;
+        renderFileList();
+        if (!morpheusBox.textContent)
+            morpheusBox.textContent = "Generation incomplete. Request restored for retry.";
         // Catch network errors or user-initiated aborts
-        if (e.name === 'AbortError') {
+        if (e.name === "AbortError") {
             appendLog("Generation stopped by user.", false);
         } else {
             appendLog("ERR: CONNECTION LOST.", true);
         }
-    }
-    finally {
+    // Always release the generation lock and restore controls.
+    // This runs after success, a network error, or Stop-button cancellation.
+    } finally {
         // 'finally' runs no matter how the try/catch block exits.
-        // This is where we safely unlock the UI and return to a neutral state.
+        // Restore controls after success, failure, or cancellation.
         isGenerating = false;
         currentAbortController = null;
         queryInput.disabled = false;
         attachBtn.disabled = false;
         sendBtn.innerHTML = `<i class="bi bi-send"></i> <span class="btn-text">Send</span>`;
         if (bufferIcon) bufferIcon.style.display = "none";
-        
+
         queryInput.focus(); // Automatically put the cursor back in the text box
     }
 }

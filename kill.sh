@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
-# -------------------------------------------------------------------------
-# Stops all background hazar-ai services (Proxy, UI, and Local Model(s)).
-# -------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# Service shutdown
+#
+# Finds gateway, UI, and local-model processes by command-line pattern.
+# Asks them to stop, waits briefly, then forces remaining matches to exit.
+# Matching processes from another installation can also be stopped.
+# ----------------------------------------------------------------------------
 
 echo ">> Stopping hazar-ai services..."
 
-## Helper function to gracefully kill a process by pattern
+## Request graceful termination, then force remaining matching processes to exit.
 kill_service() {
   local pattern=$1
   local name=$2
-  
-  ## Find PID using standard pgrep
-  local pids=$(pgrep -f "$pattern")
+  local pids=$(pgrep -f "$pattern") ## Several model servers can match, so keep every matching PID.
   
   if [ -n "$pids" ]; then
     echo ">> Stopping $name (PID $pids)..."
-    kill $pids 2>/dev/null
+    kill $pids 2>/dev/null ## Try the normal termination signal before forcing a stop.
     sleep 1
-    
-    ## Force kill if still running
+
+    ## Check again after giving each process a moment to exit.
     for pid in $pids; do
       if kill -0 "$pid" 2>/dev/null; then
         echo ">> $name did not exit gracefully, forcing termination..."

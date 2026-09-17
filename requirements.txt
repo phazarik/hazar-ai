@@ -1,0 +1,12 @@
+# ----------------------------------------------------------------------------
+# Install all gateway, terminal, and local-model dependencies from this file.
+# The llama.cpp server is included for optional GGUF inference.
+# That package may need compiler tools or a platform-specific build.
+# ----------------------------------------------------------------------------
+
+litellm[proxy]
+requests
+rich
+pyfiglet
+PyYAML
+llama-cpp-python[server]

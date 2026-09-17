@@ -1,18 +1,14 @@
 #!/usr/bin/env bash
+# ----------------------------------------------------------------------------
+# Development-container setup
+#
+# Installs the merged dependency list in the Python container.
+# Runs the same setup helper used by a normal Linux/WSL installation.
+# Provider keys still need to be filled in after setup.
+# ----------------------------------------------------------------------------
 
-# Ensure dependencies are available 
-pip install requests pyfiglet rich
-
-# Scaffold the keys file so the user can easily paste their keys
-mkdir -p core
-if [ ! -f core/litellm.env ]; then
-    cat << 'EOF' > core/litellm.env
-OPENROUTER_API_KEY=sk-or-v1-XXXXXXXXXXXX
-GEMINI_API_KEY=AIzaSyXXXXXXXXXXXX
-GROQ_API_KEY=gsk_XXXXXXXXXXXX
-TAVILY_API_KEY=tvly-dev-XXXXXXXXXXXX
-LITELLM_MASTER_KEY=sk-anything
-EOF
-fi
-
-chmod +x start.sh kill.sh query.py
+# Install dependencies and create configuration inside the development container.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+python3 -m pip install -r requirements.txt
+python3 setup.py

@@ -1,709 +1,930 @@
-/* -------------------------------------------------------------------------- */
-/* Global Variables                                                           */
-/* Defines the color palette and foundational spacing measurements.           */
-/* -------------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------------
+   Web interface styles
 
+   Sets the dark green theme, chat layout, controls, logs, and popup windows.
+   Desktop keeps chat and logs side by side; mobile stacks them vertically.
+   JavaScript controls resizing, selected buttons, and the token-bar width.
+   Shared values live in :root so theme changes can stay in one place.
+   Static presentation stays here; the HTML contains no inline styles.
+---------------------------------------------------------------------------- */
+
+/* Shared theme values. Panels, controls, and messages reuse these variables. */
 :root {
-    --bg: #050505;       /* Primary background color for the overall application window */
-    --surface: #0a0a0a;  /* Slightly lighter background for distinct panels and headers */
-    --card: #111111;     /* Distinct background for small UI elements like file chips */
-    --border: #004400;   /* Defines the outline color for dividing sections and inactive states */
-    --text: #00ff00;     /* Primary text color for readable content */
-    --muted: #008800;    /* Darker, lower-contrast text color for secondary information */
-    --accent: #00ff44;   /* Bright highlight color for active elements, buttons, and alerts */
-    --radius: 4px;       /* Defines how rounded the corners are on bordered elements */
-    --font: "Fira Code", "Consolas", monospace; /* Base typography family for the entire app */
+    --bg: #050505; /* Main page background. */
+    --surface: #0a0a0a; /* Panel and header background. */
+    --card: #111111; /* Small elements such as file chips. */
+    --border: #004400; /* Dividers and quiet outlines. */
+    --text: #00ff00; /* Main text color. */
+    --muted: #008800; /* Secondary labels and logs. */
+    --accent: #00ff44; /* Active controls and highlights. */
+    --radius: 4px; /* Shared corner rounding. */
+    --font: "Consolas", "Cascadia Mono", "Liberation Mono", monospace; /* Shared monospace font stack. */
+
+    /* Font settings. Changing the base size also scales the sizes below.
+       Both weights stay regular. Color and spacing keep labels easy to spot. */
+    --font-size-base: 13px;
+    --font-size-small: 0.85rem;
+    --font-size-tiny: 0.77rem;
+    --font-size-body: 0.92rem;
+    --font-size-title: 1.15rem;
+    --font-size-indicator: 1.38rem;
+    --font-size-heading-1: 1.6rem;
+    --font-size-heading-2: 1.4rem;
+    --font-size-heading-3: 1.2rem;
+    --font-weight-normal: 400;
+    --font-weight-emphasis: 400;
+    --line-height: 1.5;
 }
 
+/* Remove default page spacing and fill the browser window. */
 html,
 body {
-    height: 100%;                  /* Forces the document to fill the entire height of the browser window */
-    background-color: var(--bg);   /* Applies the root background color to the canvas */
-    color: var(--text);            /* Sets the default text color for all nested elements */
-    font-family: var(--font);      /* Applies the custom monospace font */
-    font-size: 14px;               /* Establishes the baseline text size */
-    margin: 0;                     /* Removes default browser spacing around the page edges */
+    height: 100%;
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-normal);
+    line-height: var(--line-height);
+    margin: 0;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Animations                                                                 */
-/* -------------------------------------------------------------------------- */
+/* Keep native controls and browser-default headings on the shared font settings. */
+button,
+input,
+select,
+textarea {
+    font-family: var(--font);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-normal);
+    line-height: var(--line-height);
+}
 
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+strong,
+b,
+.msg-content code * {
+    font-weight: var(--font-weight-emphasis);
+}
+
+h1 {
+    font-size: var(--font-size-heading-1);
+}
+
+h2 {
+    font-size: var(--font-size-heading-2);
+}
+
+h3 {
+    font-size: var(--font-size-heading-3);
+}
+
+h4,
+h5,
+h6 {
+    font-size: var(--font-size-base);
+}
+
+/* Fade and scale the activity indicator while a reply is running. */
 @keyframes pulse {
-    0% { opacity: 0.3; transform: scale(0.9); }    /* Starts dim and slightly shrunken */
-    50% { opacity: 1; transform: scale(1.1); }     /* Peaks at full visibility and slightly enlarged */
-    100% { opacity: 0.3; transform: scale(0.9); }  /* Returns to the starting state smoothly */
+    /* Start the pulse dim and slightly smaller. */
+    0% {
+        opacity: 0.3;
+        transform: scale(0.9);
+    }
+
+    /* Brighten and enlarge the indicator halfway through the pulse. */
+    50% {
+        opacity: 1;
+        transform: scale(1.1);
+    }
+
+    /* Return to the starting state so the animation loops smoothly. */
+    100% {
+        opacity: 0.3;
+        transform: scale(0.9);
+    }
 }
 
+/* Attach the pulse animation to the activity indicator. */
 .pulsate {
-    animation: pulse 1.5s infinite ease-in-out; /* Applies the keyframe animation in an endless, smooth loop */
+    animation: pulse 1.5s infinite ease-in-out;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Structural Layout Mechanics                                                */
-/* Implements a flexbox-driven full viewport height design.                   */
-/* -------------------------------------------------------------------------- */
-
+/* Stack the header above the chat and diagnostic area. */
 .app {
-    display: flex;             /* Enables flexible alignment for child containers */
-    flex-direction: column;    /* Stacks the header, main content, and footer vertically */
-    height: 100vh;             /* Locks the app height to exactly the viewport height, preventing body scroll */
+    display: flex;
+    flex-direction: column; /* Stack children vertically. */
+    height: 100vh;
+    height: 100dvh;
 }
 
+/* Keep the logo, title, and profile link in one row. */
 header {
-    display: flex;             /* Aligns logo, title, and profile link in a row */
-    align-items: center;       /* Centers the header elements vertically */
-    gap: 12px;                 /* Defines consistent spacing between items in the header */
-    padding: 10px 16px;        /* Creates internal breathing room around the header content */
-    border-bottom: 1px solid var(--border); /* Visually separates the header from the main app body */
-    background-color: var(--surface);       /* Highlights the header area against the main background */
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background-color: var(--surface);
 }
 
+/* Keep logo elements together inside the header. */
 .logo-wrapper {
-    display: flex;             /* Keeps the logo image and any related elements inline */
-    align-items: center;       /* Centers the items vertically */
-    gap: 10px;                 /* Spacing within the logo wrapper */
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
+/* Hide the native file control used by the optional logo label. */
 #customLogo {
-    display: none;             /* Hides the original file input element completely from the UI */
+    display: none; /* Remove this element from the visible layout. */
 }
 
+/* Style the optional clickable logo label as a small upload target. */
 .logo-label {
-    cursor: pointer;           /* Changes the mouse to a pointing hand to indicate interactability */
-    font-weight: bold;         /* Makes the label text thicker */
-    color: var(--accent);      /* Highlights the text using the bright accent color */
-    border: 1px dashed var(--border); /* Creates a dotted box to suggest a drop-zone or clickable area */
-    padding: 5px;              /* Adds small padding inside the dashed box */
+    cursor: pointer;
+    font-weight: var(--font-weight-emphasis);
+    color: var(--accent);
+    border: 1px dashed var(--border);
+    padding: 5px;
 }
 
+/* Limit logo height so the header stays compact. */
 #logoImg {
-    max-height: 45px;          /* Restricts the image height to keep the header compact */
+    max-height: 45px; /* Keep this element within its height limit. */
 }
 
+/* Make the app title stand out without taking too much header space. */
 .header-title {
-    font-weight: bold;         /* Makes the application name prominent */
-    font-size: 16px;           /* Slightly increases the font size compared to body text */
+    font-weight: var(--font-weight-emphasis);
+    font-size: var(--font-size-title);
 }
 
+/* Push the profile link to the far edge of the header. */
 .header-profile {
-    margin-left: auto;         /* Automatically pushes this element to the far right of the flex container */
-    color: var(--accent);      /* Uses the bright accent color for the link */
-    text-decoration: none;     /* Removes the default web browser underline from the link */
-    font-weight: bold;         /* Emphasizes the text */
-    font-size: 14px;           /* Keeps the text standard sized */
-    transition: color 0.2s ease; /* Smoothly animates color changes during mouse hover */
+    margin-left: auto; /* Push this item to the far edge of the row. */
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: var(--font-weight-emphasis);
+    font-size: var(--font-size-base);
+    transition: color 0.2s ease; /* Smooth changes between hover, active, or usage states. */
 }
 
+/* Give the profile link a brighter hover state. */
 .header-profile:hover {
-    color: var(--text);        /* Changes to the standard text color when the user hovers over it */
+    color: var(--text);
 }
 
+/* Chat and diagnostics share the remaining height.
+   The outer area clips overflow; chat and logs scroll inside their own panels.
+   This keeps the prompt area from being pushed off the page. */
 .main-layout {
-    display: flex;             /* Places the left chat panel and right stats panel side-by-side */
-    flex: 1;                   /* Forces this container to take up all vertical space belwo header */
-    overflow: hidden;          /* Prevents content spilling out; scrolling is handled by inner containers */
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    flex: 1; /* Share available space using this flex setting. */
+    overflow: hidden; /* Clip spillover; inner areas handle scrolling. */
 }
 
-/* -------------------------------------------------------------------------- */
-/* Chat Interface Area                                                        */
-/* -------------------------------------------------------------------------- */
-
+/* Stack chat history and the prompt area in the main column. */
 .left-panel {
-    display: flex;             /* Stacks the chat history and the input footer vertically */
-    flex-direction: column;    /* Ensures elements stack top-to-bottom */
-    flex: 1;                   /* Allows the left panel to take up all remaining horizontal space */
-    border-right: 1px solid var(--border); /* Visually divides the left and right panels */
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column; /* Stack children vertically. */
+    flex: 1; /* Share available space using this flex setting. */
+    border-right: 1px solid var(--border);
 }
 
+/* Scroll history while keeping the prompt area available below. */
 .chat-col {
-    flex: 1;                   /* Allows the chat history to expand and fill available vertical space */
-    overflow-y: auto;          /* Enables vertical scrolling only when chat history exceeds the visible area */
-    padding: 20px;             /* Adds breathing room around the chat bubbles */
-    min-height: 120px;         /* Prevents the chat area from collapsing completely if dragged too far */
+    flex: 1; /* Share available space using this flex setting. */
+    overflow-y: auto; /* Scroll vertically when content is taller than this area. */
+    padding: 20px;
+    min-height: 120px; /* Keep a usable minimum height. */
 }
 
-/* Drag handle between the chat history and the footer. */
+/* Horizontal divider for changing the prompt-area height. */
 .chat-resize-handle {
-    height: 6px;               /* Defines the vertical thickness of the draggable area */
-    flex: 0 0 auto;            /* Prevents the handle itself from growing or shrinking */
-    cursor: ns-resize;         /* Changes the mouse pointer to an up/down arrow indicating resizability */
-    background-color: var(--surface); /* Matches the panel backgrounds */
-    border-top: 1px solid var(--border); /* Defines the upper edge of the drag bar */
-    border-bottom: 1px solid var(--border); /* Defines the lower edge of the drag bar */
-    position: relative;        /* Establishes a coordinate system for absolute positioning of the inner line */
+    touch-action: none;
+    height: 6px;
+    flex: 0 0 auto; /* Share available space using this flex setting. */
+    cursor: ns-resize;
+    background-color: var(--surface);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    position: relative; /* Anchor positioned children to this box. */
 }
 
+/* Draw a centered grip line on the horizontal divider. */
 .chat-resize-handle::after {
-    content: "";               /* Creates a pseudo-element to act as the visual grip line */
-    position: absolute;        /* Allows exact placement inside the drag handle */
-    top: 50%;                  /* Moves the starting point to the vertical center */
-    left: 50%;                 /* Moves the starting point to the horizontal center */
-    transform: translate(-50%, -50%); /* Shifts the element back to half to perfectly center it */
-    width: 40px;               /* Defines how wide the visible grip line is */
-    height: 2px;               /* Defines how thick the visible grip line is */
-    background-color: var(--muted); /* Uses the subdued color for the grip line */
+    content: ""; /* Draw this detail without another HTML element. */
+    position: absolute; /* Position this detail inside its parent. */
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%); /* Center the grip or checkmark around its anchor point. */
+    width: 40px;
+    height: 2px;
+    background-color: var(--muted);
 }
 
+/* Highlight the chat divider during hover or dragging. */
 .chat-resize-handle:hover,
 body.resizing-chat .chat-resize-handle {
-    background-color: var(--border); /* Highlights the entire drag bar background when hovered */
+    background-color: var(--border);
 }
 
-/* Visual feedback while a file is being dragged over the app window */
+/* Show a drop target while files are dragged over the app. */
 .app.drag-active {
-    outline: 2px dashed var(--accent); /* Creates a bright dashed border around the whole app */
-    outline-offset: -4px;              /* Pulls the outline slightly inward so it isn't cut off by edges */
+    outline: 2px dashed var(--accent);
+    outline-offset: -4px; /* Keep the drag highlight inside the app edge. */
 }
 
+/* Separate chat messages and mark their left edge. */
 .msg {
-    margin-bottom: 20px;               /* Adds spacing between consecutive chat messages */
-    border-left: 2px solid var(--border); /* Creates a vertical colored bar denoting a message block */
-    padding-left: 10px;                /* Pushes the text away from the vertical border bar */
+    margin-bottom: 20px;
+    border-left: 2px solid var(--border);
+    padding-left: 10px;
 }
 
-/* Time tag styling appearing after each label */
+/* Keep timestamps smaller and quieter than role labels. */
 .time-tag {
-    color: var(--muted);               /* Dimmer color to make the timestamp secondary to the name */
-    font-weight: normal;               /* Removes bolding to lower visual priority */
-    font-size: 12px;                   /* Makes the timestamp slightly smaller than regular text */
-    margin-left: 6px;                  /* Adds space between the role name and the timestamp */
+    color: var(--muted);
+    font-weight: var(--font-weight-normal);
+    font-size: var(--font-size-small);
+    margin-left: 6px;
 }
 
+/* Leave a small gap between the role label and message text. */
 .msg-label {
-    font-weight: bold;                 /* Emphasizes the sender's name */
-    margin-bottom: 5px;                /* Adds spacing between the sender name and their message */
+    font-weight: var(--font-weight-emphasis);
+    margin-bottom: 5px;
 }
 
-/* NEO Styling*/
+/* Use a light label for the user-message role. */
 .msg.neo .role-name {
-    color: #ffffff;                    /* Hardcoded pure white color for the user's name label */
+    color: #ffffff;
 }
 
+/* Preserve typed line breaks and spacing in user messages. */
 .msg.neo .msg-content {
-    white-space: pre-wrap;             /* Preserves user line breaks and spaces, wrapping text */
-    color: var(--text);                /* Applies the standard text color to the user's input */
+    white-space: pre-wrap; /* Keep source line breaks and spacing. */
+    color: var(--text);
 }
 
-/* MORPHEUS Styling */
+/* Use a light label for the assistant-message role. */
 .msg.morpheus .role-name {
-    color: #ffffff;                    /* Hardcoded pure white color for the AI's name label */
+    color: #ffffff;
 }
 
+/* Use the shared text color for rendered assistant replies. */
 .msg.morpheus .msg-content {
-    color: var(--text);                /* Applies the standard text color to the AI's response */
+    color: var(--text);
 }
 
-/* -------------------------------------------------------------------------- */
-/* Markdown Rendering Overrides                                               */
-/* -------------------------------------------------------------------------- */
-
+/* Keep Markdown paragraphs compact inside chat messages. */
 .msg-content p {
-    margin-top: 0;                     /* Removes standard spacing above paragraphs for tighter chat bubbles */
-    margin-bottom: 10px;               /* Standardizes spacing below paragraphs */
+    margin-top: 0;
+    margin-bottom: 10px;
 }
 
+/* Code blocks get a separate dark box and horizontal scrolling. */
 .msg-content pre {
-    background-color: #000;            /* Sets a pure black background for large code blocks */
-    border: 1px solid var(--border);   /* Adds a subtle border around the code block */
-    padding: 10px;                     /* Creates inner spacing so code doesn't touch the edges */
-    border-radius: var(--radius);      /* Applies global rounded corners to the code container */
-    overflow-x: auto;                  /* Allows horizontal scrolling if a line of code is too long */
+    background-color: #000;
+    border: 1px solid var(--border);
+    padding: 10px;
+    border-radius: var(--radius);
+    overflow-x: auto; /* Allow wide code to scroll horizontally. */
 }
 
+/* Give inline code a small green background. */
 .msg-content code {
-    font-family: var(--font);          /* Enforces the monospace font inside code snippets */
-    background-color: #001100;         /* Provides a very dark green background for inline code words */
-    color: #aaffaa;                    /* Uses a very light green text color for code readability */
-    padding: 2px 4px;                  /* Small inner spacing around inline code */
-    border-radius: 2px;                /* Slightly rounds the corners of inline code backgrounds */
+    font-family: var(--font);
+    background-color: #001100;
+    color: #aaffaa;
+    padding: 2px 4px;
+    border-radius: 2px;
 }
 
+/* Avoid a second background and padding layer inside fenced code blocks. */
 .msg-content pre code {
-    background-color: transparent;     /* Removes the inline background when code is inside a large pre block */
-    padding: 0;                        /* Removes inline padding when inside a pre block */
-    color: inherit;                    /* Inherits text color handled by the syntax highlighter */
+    background-color: transparent;
+    padding: 0;
+    color: inherit;
 }
 
+/* Make Markdown tables fill the available message width. */
 .msg-content table {
-    border-collapse: collapse;         /* Merges adjacent table cell borders into a single line */
-    width: 100%;                       /* Forces the table to expand to the full width of the chat bubble */
-    margin-bottom: 10px;               /* Adds spacing below the table */
+    border-collapse: collapse; /* Merge neighboring table-cell borders. */
+    width: 100%;
+    margin-bottom: 10px;
 }
 
+/* Give table cells borders, padding, and left-aligned text. */
 .msg-content th,
 .msg-content td {
-    border: 1px solid var(--border);   /* Applies a standard border to every table cell */
-    padding: 8px;                      /* Adds breathing room inside each table cell */
-    text-align: left;                  /* Aligns table text to the start of the cell */
+    border: 1px solid var(--border);
+    padding: 8px;
+    text-align: left;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Footer and Interaction Elements                                            */
-/* -------------------------------------------------------------------------- */
-
+/* Separate the prompt area from chat history. */
 footer {
-    border-top: 1px solid var(--border); /* Adds a line separating the chat history from the input controls */
-    padding: 12px 20px;                /* Adds spacing inside the footer area */
-    background-color: var(--surface);  /* Applies the slightly lighter surface color */
+    flex-shrink: 0;
+    border-top: 1px solid var(--border);
+    padding: 12px 20px;
+    background-color: var(--surface);
 }
 
+/* Place the textarea and action buttons beside each other. */
 .input-row {
-    display: flex;                     /* Aligns the attachment button, text box, and send button horizontally */
-    gap: 12px;                         /* Controls the space between the input elements */
-    margin-top: 8px;                   /* Separates the input row from the toolbars above it */
-    align-items: flex-start;           /* Aligns items to the top so buttons don't stretch vertically */
+    position: relative;
+    min-width: 0;
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
+    align-items: flex-start;
 }
 
+/* The attachment button opens the picker without showing its native control. */
+#fileInput {
+    display: none;
+}
+
+/* Start hidden; script.js sets display while generation runs.
+   Keep the remaining appearance here so JavaScript only controls visibility. */
+#loadingBuffer {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    pointer-events: none;
+    display: none;
+    color: var(--accent);
+    align-self: center;
+    font-size: var(--font-size-indicator);
+}
+
+/* Let JavaScript grow the input; the custom handle provides manual sizing. */
 textarea {
-    flex: 1;                           /* Forces the text box to take up all remaining horizontal space */
-    background-color: var(--bg);       /* Uses the darkest background color for the text input */
-    color: var(--text);                /* Ensures typed text is visible */
-    border: 1px solid var(--border);   /* Draws an outline around the input box */
-    padding: 10px;                     /* Adds inner padding so text doesn't hit the borders */
-    font-family: var(--font);          /* Enforces the global monospace font */
-    resize: none;                      /* Disables the browser's default drag-to-resize corner */
-    height: 120px;                     /* Sets the default height of the text box; sync it with JS */
-    overflow-y: hidden;                /* Hides the scrollbar until the auto-grow script requires it */
+    --input-min-height: 120px;
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: var(--input-min-height);
+    line-height: var(--line-height);
+    flex: 1; /* Share available space using this flex setting. */
+    background-color: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 10px;
+    font-family: var(--font);
+    resize: none; /* Manual sizing uses the custom divider. */
+    height: var(--input-min-height);
+    overflow-y: hidden; /* Hide vertical spillover until the script allows scrolling. */
 }
 
+/* Base styling for clickable controls across the interface. */
 button {
-    background-color: var(--border);   /* Uses the dark border color for the button body */
-    color: var(--accent);              /* Uses the bright accent color for the button text */
-    border: 1px solid var(--accent);   /* Draws a bright outline around the button */
-    padding: 10px 20px;                /* Defines the vertical and horizontal size of the button */
-    cursor: pointer;                   /* Shows the clicking hand icon on hover */
-    font-family: var(--font);          /* Matches the application typography */
-    font-weight: bold;                 /* Emphasizes the button text */
-    display: flex;                     /* Allows icons and text to align nicely inside the button */
-    align-items: center;               /* Centers the icon and text vertically */
-    gap: 8px;                          /* Adds spacing between the icon and the text */
+    background-color: var(--border);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 10px 20px;
+    cursor: pointer;
+    font-family: var(--font);
+    font-weight: var(--font-weight-emphasis);
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
+/* Invert main button colors on hover. */
 button:hover {
-    background-color: var(--accent);   /* Inverts the button color on hover (fills with bright color) */
-    color: var(--bg);                  /* Inverts text to dark color for contrast on hover */
+    background-color: var(--accent);
+    color: var(--bg);
 }
 
+/* Keep the send button and keyboard hint in a vertical group. */
 .send-container {
-    display: flex;                     /* Enables a flexible layout for the wrapper */
-    flex-direction: column;            /* Stacks the button and the hint text vertically */
-    align-items: center;               /* Centers the hint text directly underneath the button */
-    gap: 4px;                          /* Adds a small 4-pixel gap between the button and the text */
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column; /* Stack children vertically. */
+    align-items: center;
+    gap: 4px;
 }
 
+/* Use smaller text for the send shortcut hint. */
 .send-hint {
-    font-size: 12px;                   /* Makes the hint text tiny so it doesn't clutter the UI */
-    color: var(--muted);               /* Uses theme's dim color to keep it visually secondary */
-    font-family: var(--font);          /* Enforces global Fira Code/monospace font */
+    font-size: var(--font-size-small);
+    color: var(--muted);
+    font-family: var(--font);
 }
 
+/* Let attached-file chips wrap when several files are queued. */
 .file-context {
-    font-size: 12px;                   /* Makes the attached file list text small */
-    color: var(--muted);               /* Dims the text to reduce visual clutter */
-    margin-bottom: 5px;                /* Separates the file list from the toolbars below */
-    display: flex;                     /* Allows multiple file chips to sit next to each other */
-    flex-wrap: wrap;                   /* Pushes overflowing file chips to a new line */
-    gap: 6px;                          /* Defines spacing between individual file chips */
+    font-size: var(--font-size-small);
+    color: var(--muted);
+    margin-bottom: 5px;
+    display: flex;
+    flex-wrap: wrap; /* Let controls move to another line when space runs out. */
+    gap: 6px;
 }
 
+/* Show each queued file as a compact chip. */
 .file-chip {
-    display: inline-flex;              /* Keeps the filename and the remove button aligned perfectly */
-    align-items: center;               /* Vertically centers the text in the chip */
-    background-color: var(--card);     /* Applies a distinct background color to the chip */
-    border: 1px solid var(--border);   /* Draws a subtle border around the chip */
-    padding: 2px 6px;                  /* Provides tight internal padding */
-    border-radius: var(--radius);      /* Rounds the corners of the chip */
+    display: inline-flex;
+    align-items: center;
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: var(--radius);
 }
 
+/* The remove link clears one queued attachment. */
 .file-chip-remove {
-    color: var(--muted);               /* Dims the 'x' button */
-    margin-left: 6px;                  /* Adds space between the filename and the 'x' */
-    text-decoration: none;             /* Removes underline from the link */
-    font-weight: bold;                 /* Makes the 'x' stand out slightly more */
-    cursor: pointer;                   /* Indicates it can be clicked */
+    color: var(--muted);
+    margin-left: 6px;
+    text-decoration: none;
+    font-weight: var(--font-weight-emphasis);
+    cursor: pointer;
 }
 
+/* Brighten the remove link on hover. */
 .file-chip-remove:hover {
-    color: var(--accent);              /* Highlights the 'x' brightly when hovered */
+    color: var(--accent);
 }
 
-/* -------------------------------------------------------------------------- */
-/* Diagnostic Panel (Logs and Statistics)                                     */
-/* -------------------------------------------------------------------------- */
-
+/* Avoid selecting page text while a handle is dragged. */
 body.resizing-chat,
 body.resizing-panel {
-    user-select: none;                 /* Prevents text from being highlighted while dragging panels */
+    user-select: none; /* Avoid accidental text selection during dragging. */
 }
+
+/* Use a vertical cursor during prompt-area dragging. */
 body.resizing-chat {
-    cursor: ns-resize;                 /* Forces the up/down cursor during a vertical drag */
+    cursor: ns-resize;
 }
+
+/* Use a horizontal cursor for desktop diagnostic resizing. */
 body.resizing-panel {
-    cursor: ew-resize;                 /* Forces the left/right cursor during a horizontal drag */
+    cursor: ew-resize;
 }
 
-/* Drag handle between left and right panels */
+/* Vertical divider between chat and diagnostics. */
 .panel-resize-handle {
-    width: 6px;                        /* Defines the horizontal thickness of the vertical drag bar */
-    flex: 0 0 auto;                    /* Prevents the drag handle from changing size */
-    cursor: ew-resize;                 /* Shows horizontal arrows on hover */
-    background-color: var(--surface);  /* Matches the neighboring panels */
-    border-left: 1px solid var(--border); /* Provides a dividing line */
-    position: relative;                /* Context for the inner grip line */
+    touch-action: none;
+    width: 6px;
+    flex: 0 0 auto; /* Share available space using this flex setting. */
+    cursor: ew-resize;
+    background-color: var(--surface);
+    border-left: 1px solid var(--border);
+    position: relative; /* Anchor positioned children to this box. */
 }
 
+/* Draw a centered grip line on the diagnostic divider. */
 .panel-resize-handle::after {
-    content: "";                       /* Creates the visible grip line */
-    position: absolute;                /* Allows centering inside the handle */
-    top: 50%;                          /* Aligns vertically */
-    left: 50%;                         /* Aligns horizontally */
-    transform: translate(-50%, -50%); /* Perfectly centers it based on its own dimensions */
-    width: 2px;                        /* Sets how thick the grip line is horizontally */
-    height: 40px;                      /* Sets how tall the grip line is vertically */
-    background-color: var(--muted);    /* Applies the dim color to the grip line */
+    content: ""; /* Draw this detail without another HTML element. */
+    position: absolute; /* Position this detail inside its parent. */
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%); /* Center the grip or checkmark around its anchor point. */
+    width: 2px;
+    height: 40px;
+    background-color: var(--muted);
 }
 
+/* Highlight the diagnostic divider during hover or dragging. */
 .panel-resize-handle:hover,
 body.resizing-panel .panel-resize-handle {
-    background-color: var(--border);   /* Highlights the whole bar when dragging horizontally */
+    background-color: var(--border);
 }
 
+/* Keep a steady desktop width and stack logs above usage stats. */
 .right-panel {
-    display: flex;                     /* Stacks the log area and the stats area vertically */
-    flex-direction: column;            /* Ensures top-to-bottom layout */
-    width: 350px;                      /* Sets the default starting width on desktop */
-    min-width: 200px;                  /* Prevents the user from crushing the panel too small */
-    background-color: var(--surface);  /* Distinct background color for diagnostics */
-    flex-shrink: 0;                    /* Prevents the panel from collapsing if the window shrinks */
+    display: flex;
+    flex-direction: column; /* Stack children vertically. */
+    width: 350px;
+    min-width: 200px; /* Keep a usable minimum width. */
+    background-color: var(--surface);
+    flex-shrink: 0; /* Keep diagnostics from shrinking below the chosen width. */
 }
 
+/* Logs take the panel space above stats without spilling out. */
 .log-col {
-    flex: 1;                           /* Takes up all remaining vertical space inside the right panel */
-    display: flex;                     /* Allows internal structuring of the log header and content */
-    flex-direction: column;            /* Stacks header and logs */
-    overflow: hidden;                  /* Prevents the column from pushing the layout apart */
+    flex: 1; /* Share available space using this flex setting. */
+    display: flex;
+    flex-direction: column; /* Stack children vertically. */
+    overflow: hidden; /* Clip spillover; inner areas handle scrolling. */
 }
 
+/* Separate the diagnostic heading from scrolling entries. */
 .log-header {
-    padding: 8px 12px;                 /* Defines spacing around the "LOG" title */
-    border-bottom: 1px solid var(--border); /* Divides the title from the actual log entries */
-    color: var(--muted);               /* Dims the title text */
-    font-size: 12px;                   /* Makes the title smaller than body text */
-    font-weight: bold;                 /* Emphasizes the title */
-    text-transform: uppercase;         /* Forces the title to be entirely uppercase */
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+    font-size: var(--font-size-small);
+    font-weight: var(--font-weight-emphasis);
+    text-transform: uppercase;
 }
 
+/* Scroll logs inside the panel rather than growing the whole page. */
 #logs {
-    padding: 10px;                     /* Breathing room inside the scrolling log area */
-    overflow-y: auto;                  /* Enables scrolling as logs fill up */
-    font-size: 12px;                   /* Keeps log entries compact */
-    color: var(--muted);               /* Uses the darker text for system logs */
-    flex: 1;                           /* Allows the log output to fill the container */
+    padding: 10px;
+    overflow-y: auto; /* Scroll vertically when content is taller than this area. */
+    font-size: var(--font-size-small);
+    color: var(--muted);
+    flex: 1; /* Share available space using this flex setting. */
 }
 
+/* Leave a small gap between consecutive log entries. */
 .log-entry {
-    margin-bottom: 4px;                /* Adds slight vertical separation between individual log events */
+    margin-bottom: 4px;
 }
 
+/* Anchor usage metrics below the logs. */
 .stats-panel {
-    border-top: 1px solid var(--border); /* Divides the stats section from the logs above it */
-    padding: 12px;                     /* Spacing around the stats text and progress bar */
-    background-color: var(--bg);       /* Uses the darkest background to anchor the bottom right corner */
-    font-size: 12px;                   /* Compact text size for metrics */
-    color: var(--muted);               /* Dims the metrics text */
+    border-top: 1px solid var(--border);
+    padding: 12px;
+    background-color: var(--bg);
+    font-size: var(--font-size-small);
+    color: var(--muted);
 }
 
+/* Leave room between text metrics and the token bar. */
 .stats-text {
-    margin-bottom: 6px;                /* Adds space between the stats text and the progress bar below it */
+    overflow-wrap: anywhere;
+    margin-bottom: 6px;
 }
 
-/* Usage tracking bar visualization mechanics */
+/* Token-bar track: clip the fill to the rounded outline. */
 .progress-bar-bg {
-    background-color: var(--surface);  /* Defines the color of the empty portion of the bar */
-    height: 8px;                       /* Defines the vertical thickness of the tracking bar */
-    border-radius: 4px;                /* Rounds the outer edges of the bar container */
-    overflow: hidden;                  /* Ensures the colored fill doesn't poke out of the rounded corners */
-    border: 1px solid var(--border);   /* Outlines the empty track */
+    background-color: var(--surface);
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden; /* Clip spillover; inner areas handle scrolling. */
+    border: 1px solid var(--border);
 }
 
+/* JavaScript sets width to the used-token percentage after completion. */
 .progress-bar-fill {
-    background-color: var(--accent);   /* Defines the bright color representing consumed tokens */
-    height: 100%;                      /* Takes up the full vertical thickness of its container */
-    width: 0%;                         /* Starts at zero, manipulated dynamically by JavaScript */
-    transition: width 0.3s ease;       /* Smoothly animates the bar expanding when width changes */
+    background-color: var(--accent);
+    height: 100%;
+    width: 0%; /* Starts empty; JavaScript updates the used-token percentage. */
+    transition: width 0.3s ease; /* Smooth changes between hover, active, or usage states. */
 }
 
-/* -------------------------------------------------------------------------- */
-/* Toolbar & Action Buttons                                                   */
-/* -------------------------------------------------------------------------- */
-
+/* Group model, skill, and memory controls; wrap groups on smaller widths. */
 .toolbar-row {
-    display: flex;                     /* Lays out the left controls and right controls horizontally */
-    flex-wrap: wrap;                   /* Allows the row to break into multiple lines for small screen */
-    align-items: center;               /* Vertically aligns the items in the row */
-    justify-content: space-between;    /* Pushes one tool group to the left and the other to the right */
-    gap: 10px;                         /* Spacing between groups if they wrap */
-    margin-bottom: 8px;                /* Spacing between the toolbar and the main text input */
-    padding-bottom: 8px;               /* Inner spacing above the dividing line */
-    border-bottom: 1px solid var(--border); /* Visual separator line */
+    display: flex;
+    flex-wrap: wrap; /* Let controls move to another line when space runs out. */
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
 }
 
+/* Keep related controls together with a small gap. */
 .tool-group {
-    display: flex;                     /* Keeps related buttons clustered together inline */
-    align-items: center;               /* Vertically centers buttons and labels */
-    gap: 6px;                          /* Small gap between buttons within a group */
+    flex-wrap: wrap;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
+/* Make control labels quieter than the controls themselves. */
 .tool-label {
-    font-size: 11px;                   /* Tiny text for descriptive labels (e.g., "MODEL:") */
-    color: var(--muted);               /* Dims the label to maintain focus on the buttons */
-    font-weight: bold;                 /* Emphasizes the text slightly */
+    font-size: var(--font-size-tiny);
+    color: var(--muted);
+    font-weight: var(--font-weight-emphasis);
 }
 
+/* Leave a little space before the skill selector label. */
+.skill-label {
+    margin-left: 10px;
+}
+
+/* Keep the token-limit checkbox and label aligned in one row. */
+.token-limit-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 10px;
+}
+
+/* Compact styling for toolbar buttons and selectors. */
 .tool-btn {
-    background-color: var(--bg);       /* Uses the dark background for inactive tools */
-    color: var(--muted);               /* Uses dim text for inactive tools */
-    border: 1px solid var(--border);   /* Subtle border for inactive tools */
-    padding: 4px 10px;                 /* Compact padding for smaller UI controls */
-    font-size: 12px;                   /* Smaller font size than primary buttons */
-    cursor: pointer;                   /* Indicates interactability */
-    font-family: var(--font);          /* Enforces global font */
-    transition: all 0.2s ease;         /* Smoothly animates colors on hover or active states */
+    background-color: var(--bg);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    font-size: var(--font-size-small);
+    cursor: pointer;
+    font-family: var(--font);
+    transition: all 0.2s ease; /* Smooth changes between hover, active, or usage states. */
 }
 
+/* Show the toolbar hover state. */
 .tool-btn:hover {
-    color: var(--bg);                  /* Reverses text to dark on hover */
-    border-color: var(--accent);       /* Highlights the border on hover */
+    color: var(--bg);
+    border-color: var(--accent);
 }
 
+/* Mark the selected model or enabled toolbar option. */
 .tool-btn.active {
-    background-color: var(--border);   /* Gives active buttons a distinct fill */
-    color: var(--accent);              /* Highlights the active button's text */
-    border-color: var(--accent);       /* Highlights the active button's outline */
-    font-weight: bold;                 /* Emphasizes the active button text */
+    background-color: var(--border);
+    color: var(--accent);
+    border-color: var(--accent);
+    font-weight: var(--font-weight-emphasis);
 }
 
+/* Remove native selector styling to match the toolbar. */
 select.tool-btn {
-    appearance: none;                  /* Strips default browser styling from the dropdown */
-    -webkit-appearance: none;          /* Strips default styling in WebKit browsers (Safari/Chrome) */
-    -moz-appearance: none;             /* Strips default styling in Firefox */
-    padding-right: 20px;               /* Leaves room for a custom arrow or just extra breathing space */
-    cursor: pointer;                   /* Shows interactability */
+    appearance: none; /* Remove native browser control styling. */
+    -webkit-appearance: none; /* Use the same control reset in WebKit browsers. */
+    -moz-appearance: none; /* Use the same control reset in Firefox. */
+    padding-right: 20px;
+    cursor: pointer;
 }
 
+/* Keep opened selector options in the same dark theme. */
 select.tool-btn option {
-    background-color: var(--bg);       /* Forces the dropdown menu items to match the dark theme */
-    color: var(--text);                /* Ensures dropdown options are readable */
+    background-color: var(--bg);
+    color: var(--text);
 }
 
-/* -------------------------------------------------------------------------- */
-/* Custom Checkbox & Disabled Input States                                    */
-/* -------------------------------------------------------------------------- */
-
+/* Draw a small themed checkbox instead of the browser default. */
 #limitTokensToggle {
-    appearance: none;                  /* Removes the standard blue browser checkbox */
-    -webkit-appearance: none;          /* Removes WebKit default checkbox */
-    width: 14px;                       /* Defines the exact width of the custom box */
-    height: 14px;                      /* Defines the exact height of the custom box */
-    background-color: var(--bg);       /* Sets the unchecked background to dark */
-    border: 1px solid var(--border);   /* Outlines the unchecked box */
-    border-radius: 2px;                /* Slightly rounds the custom checkbox corners */
-    cursor: pointer;                   /* Indicates it can be clicked */
-    position: relative;                /* Establishes context for the custom checkmark icon */
-    margin: 0;                         /* Removes default browser margins */
+    appearance: none; /* Remove native browser control styling. */
+    -webkit-appearance: none; /* Use the same control reset in WebKit browsers. */
+    width: 14px;
+    height: 14px;
+    background-color: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    cursor: pointer;
+    position: relative; /* Anchor positioned children to this box. */
+    margin: 0;
 }
 
+/* Highlight the checkbox while the output limit is enabled. */
 #limitTokensToggle:checked {
-    border-color: var(--accent);       /* Highlights the box outline when activated */
+    border-color: var(--accent);
 }
 
+/* Place a centered checkmark inside the enabled checkbox. */
 #limitTokensToggle:checked::after {
-    content: '✔';                      /* Automatically injects a checkmark symbol */
-    color: var(--accent);              /* Colors the checkmark bright green */
-    font-size: 11px;                   /* Sizes the checkmark to fit the box */
-    position: absolute;                /* Allows exact placement inside the box */
-    top: 50%;                          /* Aligns vertically */
-    left: 50%;                         /* Aligns horizontally */
-    transform: translate(-50%, -50%); /* Centers the checkmark perfectly */
+    content: "✔"; /* Draw this detail without another HTML element. */
+    color: var(--accent);
+    font-size: var(--font-size-tiny);
+    position: absolute; /* Position this detail inside its parent. */
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%); /* Center the grip or checkmark around its anchor point. */
 }
 
+/* Keep the numeric output-limit field compact inside the toolbar. */
+#maxTokensInput {
+    width: 70px;
+}
+
+/* Dim the max-token field when its limit is off. */
 #maxTokensInput:disabled {
-    background-color: #001a00;         /* Dims the input box visually to indicate it is inactive */
-    color: var(--muted);               /* Dims the text inside the disabled input */
-    border-color: var(--border);       /* Returns the outline to the inactive state */
-    cursor: not-allowed;               /* Changes the mouse to a slashed circle indicating it cannot be clicked */
+    background-color: #001a00;
+    color: var(--muted);
+    border-color: var(--border);
+    cursor: not-allowed;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Welcome Modal UI                                                           */
-/* Placed before Mobile Responsiveness to allow overriding if necessary       */
-/* -------------------------------------------------------------------------- */
-
+/* Cover the page and center the welcome popup above the interface. */
 .modal-overlay {
-    position: fixed;                   /* Locks the overlay to the browser window, ignoring scrolling */
-    top: 0;                            /* Pins to the absolute top of the screen */
-    left: 0;                           /* Pins to the absolute left of the screen */
-    width: 100vw;                      /* Forces the overlay to cover 100% of the viewport width */
-    height: 100vh;                     /* Forces the overlay to cover 100% of the viewport height */
-    background: rgba(0, 0, 0, 0.85);   /* Creates a dark, semi-transparent background to hide the app */
-    display: flex;                     /* Enables centering of the modal box */
-    justify-content: center;           /* Centers the modal horizontally */
-    align-items: center;               /* Centers the modal vertically */
-    z-index: 1000;                     /* Forces the modal to sit on top of all other elements */
+    position: fixed; /* Keep the popup attached to the viewport. */
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000; /* Keep the popup above the rest of the interface. */
 }
 
+/* Hide the welcome popup after dismissal. */
 .modal-overlay.hidden {
-    display: none;                     /* Completely removes the modal from rendering when hidden */
+    display: none; /* Remove this element from the visible layout. */
 }
 
+/* Keep popup content inside the viewport and scroll long explanations. */
 .modal-content {
-    background-color: var(--surface);  /* Distinguishes the modal body from the dark overlay */
-    border: 1px solid var(--border);   /* Outlines the modal box */
-    padding: 24px;                     /* Generous internal spacing for readability */
-    border-radius: var(--radius);      /* Applies standard rounded corners */
-    max-width: 500px;                  /* Prevents the modal from stretching too wide on large screens */
-    width: 90%;                        /* Restricts the width relative to smaller screens, crucial for mobile */
-    max-height: 85vh;                  /* Prevents the modal from clipping off the top/bottom of the screen */
-    overflow-y: auto;                  /* Enables internal scrolling if the content exceeds the height */
-    color: var(--text);                /* Applies standard readable text color */
-    box-shadow: 0 0 20px rgba(0, 255, 68, 0.05); /* Creates a very subtle green glowing shadow around the box */
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    padding: 24px;
+    border-radius: var(--radius);
+    max-width: 500px; /* Stop this element stretching past its width limit. */
+    width: 90%;
+    max-height: 85vh; /* Keep this element within its height limit. */
+    overflow-y: auto; /* Scroll vertically when content is taller than this area. */
+    color: var(--text);
+    box-shadow: 0 0 20px rgba(0, 255, 68, 0.05);
 }
 
+/* Separate the popup heading from the text below. */
 .modal-content h2 {
-    margin-top: 0;                     /* Removes default spacing above the title */
-    color: var(--accent);              /* Highlights the modal title */
-    border-bottom: 1px solid var(--border); /* Separates the title from the body text */
-    padding-bottom: 10px;              /* Spacing below the title, before the line */
-    font-size: 16px;                   /* Sets a distinct, slightly larger font size for the header */
+    margin-top: 0;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+    font-size: var(--font-size-title);
 }
 
+/* Use comfortable line spacing for popup explanations. */
 .modal-content p {
-    font-size: 13px;                   /* Reduces the text size */
-    line-height: 1.5;                  /* Adds breathing room between lines */
+    font-size: var(--font-size-body);
+    line-height: var(--line-height);
 }
 
+/* Indent popup bullet points and leave space before the close button. */
 .modal-content ul {
-    padding-left: 20px;                /* Indents the bullet points properly */
-    margin-bottom: 24px;               /* Space between the list and the acknowledge button */
-    color: var(--text);                /* Ensures list items are standard color */
+    padding-left: 20px;
+    margin-bottom: 24px;
+    color: var(--text);
 }
 
+/* Keep popup list items small but easy to scan. */
 .modal-content li {
-    font-size: 13px;                   /* Reduces the text size for the items */
-    margin-bottom: 8px;                /* Slightly tightens the gap between different bullet points */
-    line-height: 1.5;                  /* Improves readability if an item wraps to a second line */
+    font-size: var(--font-size-body);
+    margin-bottom: 8px;
+    line-height: var(--line-height);
 }
 
+/* Highlight key terms inside the popup. */
 .modal-content strong {
-    color: var(--accent);              /* Highlights bolded terms in the list */
+    color: var(--accent);
 }
 
+/* Let the popup close button fill its row. */
 .modal-close-btn {
-    width: 100%;                       /* Makes the close button stretch across the entire modal bottom */
-    justify-content: center;           /* Centers the text inside the button */
+    width: 100%;
+    justify-content: center;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Mobile Responsiveness Rules                                                */
-/* Overrides structural elements dynamically on smaller screens               */
-/* -------------------------------------------------------------------------- */
+/* Let response-file download links wrap onto another line. */
+.output-downloads {
+    display: flex;
+    flex-wrap: wrap; /* Let controls move to another line when space runs out. */
+    gap: 12px;
+    padding: 8px;
+}
 
+/* Wrap long filenames instead of stretching the chat column. */
+.output-downloads a {
+    color: var(--accent);
+    overflow-wrap: anywhere; /* Wrap long words or filenames instead of widening the panel. */
+}
+
+/* Keep full skill inspection in a scrollable, themed popup. */
+#skillDialog {
+    background-color: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    width: min(800px, 85vw);
+    max-height: 80vh; /* Keep this element within its height limit. */
+}
+
+/* Dim the app while skill inspection is open. */
+#skillDialog::backdrop {
+    background-color: rgba(0, 0, 0, 0.8);
+}
+
+/* Preserve skill line breaks while wrapping long source lines. */
+#skillDialogText {
+    white-space: pre-wrap; /* Keep source line breaks and spacing. */
+    overflow-wrap: anywhere; /* Wrap long words or filenames instead of widening the panel. */
+    font-family: var(--font);
+}
+
+/* Mobile layout
+   Stack diagnostics below chat and change its drag direction to vertical.
+   JavaScript adjusts panel height here rather than desktop panel width.
+   Narrow controls wrap, and action-button text stays hidden. */
 @media (max-width: 768px) {
-    
+    /* Stack chat and diagnostics vertically on smaller screens. */
     .main-layout {
-        flex-direction: column;        /* Stacks the left chat panel on top of the right diagnostic panel */
+        flex-direction: column; /* Stack children vertically. */
     }
-    
+
+    /* Drop the desktop side border and allow chat to shrink. */
     .left-panel {
-        border-right: none;            /* Removes the now-unnecessary vertical dividing line */
-        min-height: 0;                 /* Prevents the chat from blowing out the vertical layout */
+        border-right: none;
+        min-height: 0; /* Keep a usable minimum height. */
     }
 
-    /* Sets the right panel to a compact default height showing only stats */
+    /* Start diagnostics small; JavaScript can expand the panel height. */
     .right-panel {
-        width: 100%;                   /* Forces the diagnostic panel to span the full screen width */
-        max-width: 100%;               /* Removes maximum width constraints */
-        height: 65px;                  /* Compact default height: only tall enough for the stats bar */
-        min-height: 55px;              /* Minimum height when fully collapsed */
-        max-height: 70vh;              /* Prevents the panel from taking up too much screen when expanded */
-        overflow: hidden;              /* Hides the logs by default while collapsed */
-        border-top: 1px solid var(--border); /* Adds a horizontal dividing line above the panel */
+        width: 100%;
+        max-width: 100%; /* Stop this element stretching past its width limit. */
+        height: 65px;
+        min-height: 55px; /* Keep a usable minimum height. */
+        max-height: 70vh; /* Keep this element within its height limit. */
+        overflow: hidden; /* Clip spillover; inner areas handle scrolling. */
+        border-top: 1px solid var(--border);
     }
 
-    /* Allows logs to become visible and scrollable once you pull the panel open */
+    /* Allow log scrolling during panel interaction. */
     .right-panel:hover,
     body.resizing-panel .right-panel {
-        overflow-y: auto;              /* Restores scrolling when interacting with the panel */
+        overflow-y: auto; /* Scroll vertically when content is taller than this area. */
     }
 
+    /* Keep logs available when the panel is expanded. */
     .log-col {
-        display: flex;                 /* Keeps the log structure intact so it can be revealed */
-        flex: 1;                       /* Takes up available space when expanded */
+        display: flex;
+        flex: 1; /* Share available space using this flex setting. */
     }
-    
-    /* Makes the mobile resize handle taller and clearly visible as a pull-up tab */
+
+    /* Turn the divider into a horizontal, touch-friendly pull handle. */
     .panel-resize-handle {
-        width: 100%;                   /* Spans the full screen width horizontally */
-        height: 12px;                  /* Taller touch target so it's easy to grab with a finger */
-        cursor: ns-resize;             /* Shows up/down arrows */
-        background-color: var(--surface); /* Surface background color */
-        border-left: none;             
-        border-right: none;            
-        border-top: 1px solid var(--accent); /* Bright accent border so it stands out visually */
-        border-bottom: 1px solid var(--border); /* Dividing lower edge */
-        position: relative;
+        width: 100%;
+        height: 12px;
+        cursor: ns-resize;
+        background-color: var(--surface);
+        border-left: none;
+        border-right: none;
+        border-top: 1px solid var(--accent);
+        border-bottom: 1px solid var(--border);
+        position: relative; /* Anchor positioned children to this box. */
     }
-    
+
+    /* Use a wider horizontal grip line on mobile. */
     .panel-resize-handle::after {
-        width: 50px;                   /* Wider grip line */
-        height: 3px;                   /* Thicker grip line */
-        background-color: var(--accent); /* Uses bright accent color instead of dim muted color */
+        width: 50px;
+        height: 3px;
+        background-color: var(--accent);
     }
-    
+
+    /* Use the vertical cursor because the mobile panel changes height. */
     body.resizing-panel {
-        cursor: ns-resize;             /* Forces up/down cursor across the screen during the drag event */
+        cursor: ns-resize;
     }
 
+    /* Stack toolbar groups to avoid crowding the narrow input area. */
     .toolbar-row {
-        flex-direction: column;        /* Stacks the tool groups vertically on narrow screens */
-        align-items: stretch;          /* Forces elements to span the full width if needed */
+        flex-direction: column; /* Stack children vertically. */
+        align-items: stretch;
     }
-    
+
+    /* Let controls wrap across the full mobile width. */
     .tool-group {
-        flex-wrap: wrap;               /* Allows buttons within a group to flow to a new line */
-        justify-content: flex-start;   /* Aligns items to the left edge */
-        width: 100%;                   /* Ensures the group takes up the full width */
-        margin-bottom: 5px;            /* Adds spacing between vertically stacked tool groups */
+        flex-wrap: wrap; /* Let controls move to another line when space runs out. */
+        justify-content: flex-start;
+        width: 100%;
+        margin-bottom: 5px;
     }
 
+    /* Align compact action buttons with the bottom of the input. */
     .input-row {
-        align-items: flex-end;         /* Aligns the attach/send buttons with the bottom edge of the textarea */
-        gap: 8px;                      /* Slightly reduces the spacing between elements on small screens */
+        align-items: flex-end;
+        gap: 8px;
     }
-    
+
+    /* Hide action-button text so only icons remain. */
     .input-row .btn-text {
-        display: none;                 /* Hides text labels on primary buttons to save space; only icons */
+        display: none; /* Remove this element from the visible layout. */
     }
-    
+
+    /* Keep icon-only buttons large enough to tap. */
     .input-row button {
-        padding: 10px 14px;            /* Adjusts button padding to balance the missing text */
+        padding: 10px 14px;
     }
 
+    /* Use a shorter starting input height on small screens. */
     textarea {
-        height: 50px;                  /* Shrinks the text box height to leave more room for mobile keyboards */
+        --input-min-height: 50px;
+        height: var(--input-min-height);
     }
 
+    /* Let header items wrap when space runs out. */
     header {
-        flex-wrap: wrap;               /* Allows header elements to wrap if the title is long */
-        justify-content: space-between; /* Pushes elements to opposite edges */
-    }
-    
-    .header-profile {
-        margin-left: 0;                /* Resets the auto-margin so it behaves predictably when wrapped */
+        flex-wrap: wrap; /* Let controls move to another line when space runs out. */
+        justify-content: space-between;
     }
 
+    /* Remove the desktop auto margin when the header wraps. */
+    .header-profile {
+        margin-left: 0;
+    }
+
+    /* Hide the keyboard hint to save mobile space. */
     .send-hint {
-        display: none;                 /* Completely hides the hint text on mobile devices to save space */
+        display: none; /* Remove this element from the visible layout. */
     }
 }

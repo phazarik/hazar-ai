@@ -1,183 +1,273 @@
-<!DOCTYPE html>
+<!doctype html>
+<!--------------------------------------------------------------------------
+     Browser interface page     
+     Provides chat history, attachments, model/skill controls, and logs.
+     Loads Markdown, math, code highlighting, icons, and sanitizing libraries.
+     The local script handles requests; Python serves this page and the API.
+     Skill inspection uses a plain-text popup instead of Markdown rendering.
+  -------------------------------------------------------------------------->
 <html lang="en">
-<!-- ui/index.html -->
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>hazar-ai</title>
-  <link rel="icon" href="/.image/logo.png" type="image/png">
-  
-  <!-- External Libraries: Syntax highlighting, Icons, and Markdown parsing -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  
-  <!-- KaTeX for native LaTeX math rendering -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/marked-katex-extension@5.0.0/lib/index.umd.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
 
-  <!-- Web Font Import (Fira Code) -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;700&display=swap" rel="stylesheet">
-  
-  <!-- Local Stylesheet -->
-  <link rel="stylesheet" href="/style.css">
-</head>
-<body>
-  <div class="app">
-    
-    <!-- ========================================== -->
-    <!-- HEADER SECTION                             -->
-    <!-- Contains the dynamic logo and app title    -->
-    <!-- ========================================== -->
-    <header>
-      <div class="logo-wrapper">
-	<img id="logoImg" src="../.image/logo.png" alt="hazar-ai logo">
-      </div>
-      <span class="header-title">hazar-ai</span>
-      <a href="https://phazarik.github.io" target="_blank" class="header-profile">phazarik.github.io</a>
-    </header>
+  <!-- ui/index.html -->
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>hazar-ai</title>
+    <link rel="icon" href="/.image/logo.png" type="image/png">
 
-    <!-- ========================================== -->
-    <!-- MAIN LAYOUT                                -->
-    <!-- Splits the screen into Left (Chat)         -->
-    <!-- and Right (Logs/Stats) panels              -->
-    <!-- ========================================== -->
-    <div class="main-layout">
-      
-      <!-- ======================================== -->
-      <!-- LEFT PANEL: Chat History and Input Area  -->
-      <!-- ======================================== -->
-      <div class="left-panel">
-        
-        <!-- Chat History Container -->
-        <div class="chat-col" id="history"></div>
+    <!-- External Libraries: Syntax highlighting, Icons, and Markdown parsing -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 
-        <!-- Drag handle: lets the user resize the chat history area up/down.
-             The footer (toolbar + input row) below it keeps a fixed size. -->
-        <div class="chat-resize-handle" id="chatResizeHandle" title="Drag to resize text box"></div>
+    <!-- KaTeX for native LaTeX math rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked-katex-extension@5.0.0/lib/index.umd.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
 
-        <!-- Footer / Input Area -->
-        <footer>
-          <!-- Displays currently loaded files -->
-          <div class="file-context" id="fileList">NO FILES ATTACHED.</div>
+    <!-- Web Font Import (Fira Code) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;700&amp;display=swap" rel="stylesheet">
 
-	  <!-- Toolbar: Model selection, Skills, and System Controls -->
-          <div class="toolbar-row">
-            <div class="tool-group">
-              <span class="tool-label">Model:</span>
-              <button type="button" class="tool-btn active" data-model="auto">Auto</button>
-              <button type="button" class="tool-btn" data-model="fast">Fast</button>
-              <button type="button" class="tool-btn" data-model="smart">Smart</button>
-              <button type="button" class="tool-btn" data-model="local">Local</button>
-              
-              <!-- Skill Selector placed right next to the model buttons -->
-              <span class="tool-label" style="margin-left: 10px;">Skill:</span>
-              <select id="skillSelector" class="tool-btn">
-                <option value="">None</option>
-              </select>
+    <!-- Local Stylesheet -->
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body>
+    <div class="app">
 
-              <!-- Max Tokens Toggle & Input -->
-              <span class="tool-label" style="margin-left: 10px; display: inline-flex; align-items: center; gap: 4px;">
-                <input type="checkbox" id="limitTokensToggle" checked title="Limit output length"> 
-                Max Tokens:
-              </span>
-              <input type="number" id="maxTokensInput" class="tool-btn" value="900" style="width: 70px;" title="Maximum generated tokens">
+      <!-- ========================================== -->
+      <!-- HEADER SECTION -->
+      <!-- Contains the dynamic logo and app title -->
+      <!-- ========================================== -->
+      <header>
+        <div class="logo-wrapper"> <img id="logoImg" src="../.image/logo.png" alt="hazar-ai logo"></div>
+        <span class="header-title">hazar-ai</span> <a href="https://phazarik.github.io" target="_blank" class="header-profile"> phazarik.github.io </a>
+      </header>
+
+      <!-- ========================================== -->
+      <!-- MAIN LAYOUT -->
+      <!-- Splits the screen into Left (Chat) -->
+      <!-- and Right (Logs/Stats) panels -->
+      <!-- ========================================== -->
+      <div class="main-layout">
+
+        <!-- ======================================== -->
+        <!-- LEFT PANEL: Chat History and Input Area -->
+        <!-- ======================================== -->
+        <div class="left-panel">
+
+          <!-- Chat History Container -->
+          <div class="chat-col" id="history"></div>
+
+          <!-- Drag handle: lets the user resize the chat history area up/down.
+               The footer (toolbar + input row) below it keeps a fixed size.-->
+          <div class="chat-resize-handle" id="chatResizeHandle" title="Drag to resize text box"></div>
+
+          <!-- Footer / Input Area -->
+          <footer>
+
+            <!-- Displays currently loaded files -->
+            <div class="file-context" id="fileList">NO FILES ATTACHED.</div>
+
+            <!-- Toolbar: Model selection, Skills, and System Controls -->
+            <div class="toolbar-row">
+              <div class="tool-group">
+                <span class="tool-label">Model:</span>
+                <button type="button" class="tool-btn active" data-model="auto" title="Choose a model automatically">Automatic</button>
+                <button type="button" class="tool-btn" data-model="fast" title="For quick, everyday questions">Quick</button>
+                <button type="button" class="tool-btn" data-model="smart" title="For harder questions and detailed work">Detailed</button>
+                <button type="button" class="tool-btn" data-model="local" title="Use a model installed on this device">On this device</button>
+
+                <!-- Skill Selector placed right next to the model buttons -->
+                <span class="tool-label skill-label">Skill:</span>
+                <select id="skillSelector" class="tool-btn"> <option value="">None</option></select>
+                <button id="viewSkillBtn" class="tool-btn" type="button">View skill</button>
+
+                <!-- Max Tokens Toggle & Input -->
+                <span class="tool-label token-limit-label">
+                  <input type="checkbox" id="limitTokensToggle" checked title="Limit output length">
+		  Max Tokens:
+                </span>
+                <input type="number" id="maxTokensInput" class="tool-btn" value="900" title="Maximum generated tokens">
+              </div>
+              <div class="tool-group">
+                <span class="tool-label">CONTROLS:</span>
+                <button type="button" class="tool-btn" id="helpBtn" title="Show Help/Welcome Modal">
+                  <i class="bi bi-question-circle"></i>
+                  <span class="btn-text">Help</span>
+                </button>
+                <button type="button" class="tool-btn" id="memStatusBtn" title="Check Memory Status">
+                  <i class="bi bi-info-circle"></i>
+                  <span class="btn-text">Status</span>
+                </button>
+                <button type="button" class="tool-btn" id="optimizeTokensBtn" title="Lossless file deduplication and JSON compaction">
+                  <i class="bi bi-lightning-charge"></i>
+                  <span class="btn-text">Optimize: OFF</span>
+                </button>
+                <button type="button" class="tool-btn active" id="toggleMemoryBtn" title="Toggle memory persistence">
+                  <i class="bi bi-cpu"></i>
+                  <span class="btn-text">Memory: ON</span>
+                </button>
+		<button type="button" class="tool-btn" id="clearChatBtn" title="Clear displayed chat; retain memory">
+                  <i class="bi bi-trash"></i>
+                  <span class="btn-text">Clear Chat</span>
+                </button>
+		<button type="button" class="tool-btn" id="clearMemoryBtn" title="Wipe conversation history">
+                  <i class="bi bi-trash"></i>
+                  <span class="btn-text">Clear Memory</span>
+                </button>
+              </div>
             </div>
 
-            <div class="tool-group">
-              <span class="tool-label">CONTROLS:</span>
-	      <button type="button" class="tool-btn" id="helpBtn" title="Show Help/Welcome Modal">
-                <i class="bi bi-question-circle"></i> <span class="btn-text">Help</span>
+            <!-- Primary User Input Row -->
+            <div class="input-row">
+
+              <!-- Hidden file input triggered by the Attach button -->
+              <input type="file" id="fileInput" multiple>
+              <button id="attachBtn">
+                <i class="bi bi-paperclip"></i>
+                <span class="btn-text">Attach file</span>
               </button>
-              <button type="button" class="tool-btn" id="memStatusBtn" title="Check Memory Status">
-                <i class="bi bi-info-circle"></i> <span class="btn-text">Status</span>
-              </button>
-              <button type="button" class="tool-btn" id="optimizeTokensBtn" title="Strips empty lines & whitespace from attached files">
-                <i class="bi bi-lightning-charge"></i> <span class="btn-text">Optimize: OFF</span>
-              </button>
-              <button type="button" class="tool-btn active" id="toggleMemoryBtn" title="Toggle memory persistence">
-                <i class="bi bi-cpu"></i> <span class="btn-text">Memory: ON</span>
-              </button>
-	      <button type="button" class="tool-btn" id="clearMemoryBtn" title="Wipe conversation history">
-                <i class="bi bi-trash"></i> <span class="btn-text">Clear Memory</span>
-              </button>
+              <textarea id="queryInput" placeholder="ENTER QUERY..."></textarea>
+
+              <!-- Animated Loading Indicator (Hidden by default) -->
+              <span id="loadingBuffer" class="pulsate"> <i class="bi bi-arrow-repeat"></i></span>
+              <div class="send-container">
+                <button id="sendBtn"><i class="bi bi-send"></i>
+                  <span class="btn-text">Send</span>
+		</button>
+                <span class="send-hint">Ctrl/Shift + Enter</span>
+              </div>
+            </div>
+          </footer>
+        </div>
+
+        <!-- Drag handle for adjusting the side panel size -->
+        <div class="panel-resize-handle" id="panelResizeHandle" title="Drag to resize panel"></div>
+
+        <!-- ======================================== -->
+        <!-- RIGHT PANEL: Diagnostics and Logs -->
+        <!-- ======================================== -->
+        <div class="right-panel">
+
+          <!-- Live Server Logs -->
+          <div class="log-col" id="logPanel">
+            <div class="log-header">LOG</div>
+            <div id="logs"></div>
+          </div>
+
+          <!-- Usage Statistics & Token Bar -->
+          <div class="stats-panel" id="statsPanel">
+            <div class="stats-text" id="statsText">AI: Ready</div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" id="tokBarFill"></div>
             </div>
           </div>
-
-          <!-- Primary User Input Row -->
-          <div class="input-row">
-            <!-- Hidden file input triggered by the Attach button -->
-            <input type="file" id="fileInput" multiple style="display:none;">
-            <button id="attachBtn"><i class="bi bi-paperclip"></i> <span class="btn-text">Attach file</span></button>
-            
-            <textarea id="queryInput" placeholder="ENTER QUERY..."></textarea>
-            
-            <!-- Animated Loading Indicator (Hidden by default) -->
-	    <span id="loadingBuffer" class="pulsate"
-		  style="display:none; color: var(--accent); align-self: center; font-size: 20px;">
-	      <i class="bi bi-arrow-repeat"></i>
-	    </span>
-
-	    <div class="send-container">
-	      <button id="sendBtn"><i class="bi bi-send"></i> <span class="btn-text">Send</span></button>
-	      <span class="send-hint">Ctrl/Shift + Enter</span>
-	    </div>
-            
-          </div>
-        </footer>
-      </div>
-
-      <!-- Drag handle for adjusting the side panel size -->
-      <div class="panel-resize-handle" id="panelResizeHandle" title="Drag to resize panel"></div>
-
-      <!-- ======================================== -->
-      <!-- RIGHT PANEL: Diagnostics and Logs        -->
-      <!-- ======================================== -->
-      <div class="right-panel">
-        <!-- Live Server Logs -->
-        <div class="log-col" id="logPanel">
-          <div class="log-header">LOG</div>
-          <div id="logs"></div>
         </div>
-
-	<!-- Usage Statistics & Token Bar -->
-        <div class="stats-panel" id="statsPanel">
-          <div class="stats-text" id="statsText">Model: N/A | Free Tokens: --- (0% used)</div>
-          <div class="progress-bar-bg">
-            <div class="progress-bar-fill" id="tokBarFill"></div>
-          </div>
-        </div>
-      
       </div>
     </div>
-  </div>
 
-  <!-- ======================================== -->
-  <!-- WELCOME MODAL OVERLAY                    -->
-  <!-- ======================================== -->
-  <div class="modal-overlay hidden" id="welcomeModal">
-    <div class="modal-content">
-      <h2> <i class="bi bi-question-circle"></i> Help</h2>
-      <p>Hello! Here is the control panel overview:</p>
-      <ul>
-        <li><strong>Model:</strong> Selects the intelligence tier. Auto (default) dynamically routes to Fast or Smart based on prompt complexity.</li>
-        <li><strong>Skill:</strong> Injects specific system instructions into the LLM context. I am using prompt-master by default.</li>
-        <li><strong>Max Tokens:</strong> Caps the length of the generated response. 900 is a reasonable number. Uncheck to remove the limit entirely.</li>
-	<li><strong>Status:</strong> Outputs the current size of the memory database to the log window.</li>
-        <li><strong>Optimize:</strong> Strips whitespace and empty lines from attached files to save context space.</li>
-        <li><strong>Memory:</strong> Retains conversation history.</li>
-        <li><strong>Claer Memory:</strong> Wipes all conversation history.</li>
-      </ul>
-      <button class="modal-close-btn" id="closeWelcomeBtn">Okay</button>
+        <!-- ======================================== -->
+    <!-- WELCOME MODAL OVERLAY -->
+    <!-- ======================================== -->
+    <div class="modal-overlay hidden" id="welcomeModal">
+      <div class="modal-content">
+        <h2>
+          <i class="bi bi-question-circle"></i>
+          Help
+        </h2>
+        <p>Here is what each option does:</p>
+        <ul>
+          <li>
+            <strong>Model:</strong> "Automatic" picks a model based on the question.
+            "Quick" suits everyday questions. "Detailed" suits harder tasks.
+            "On this device" uses an installed model and needs the local model server running.
+          </li>
+          <li>
+            <strong>Skill:</strong> Adds instructions for a particular task.
+            "None" adds no extra instructions. "prompt-master" helps write prompts;
+            "ponytail-lite" helps produce short, complete code. Available choices depend on installed skills.
+          </li>
+          <li>
+            <strong>View skill:</strong> Opens the selected skill's instructions for reading.
+            This does not send a message. Only the first 3,000 characters are included with a request.
+          </li>
+          <li>
+            <strong>Max Tokens:</strong> Sets the maximum reply length.
+            Tokens are small pieces of text. A larger number allows a longer reply;
+            a smaller number may cut it short. Uncheck to use the model's default limit.
+          </li>
+          <li>
+            <strong>Status:</strong> Shows information about saved conversation memory in the log panel.
+          </li>
+          <li>
+            <strong>Optimize:</strong> Click to turn file optimization on or off.
+            When on, repeated file content is sent once, and unnecessary spacing in valid JSON is removed.
+            Code and comments stay intact. This can reduce the amount of text sent to the model.
+          </li>
+          <li>
+            <strong>Attach file:</strong> Adds files to the next message.
+            Files can also be dragged onto the page. Remove an attached file before sending
+            if it should not be included.
+          </li>
+          <li>
+            <strong>Send / Stop:</strong> Send submits the message and attached files.
+            While a reply is being written, the button changes to Stop.
+            Stop cancels the reply and restores the message and attachments for another attempt.
+            Text already received stays visible.
+          </li>
+          <li>
+            <strong>Clear Chat:</strong> Removes messages from the screen without deleting saved memory.
+            Saved messages may return after refreshing the page.
+          </li>
+          <li>
+            <strong>Generated files:</strong> Code snippets in completed replies appear with download links.
+            Click a link to save the file. Copies are also kept in the app's output folder.
+          </li>
+          <li>
+            <strong>When a model is busy:</strong> The app may try another configured model.
+            If the reply still fails, the message and attachments are restored for another attempt.
+            Any partial reply stays visible, but is not saved to memory or turned into downloadable files.
+          </li>
+          <li>
+            <strong>Add or remove skills:</strong> Keep each skill in
+            ~/.claude/skills/&lt;skill-name&gt;/SKILL.md.
+            Add or remove a skill folder, then refresh the page to update the choices.
+          </li>
+          <li>
+            <strong>OmniRoute:</strong> There is no button for this.
+            It is an optional server setup that connects the app to models through another service.
+            Once configured, the same chat controls work as usual.
+          </li>
+          <li>
+            <strong>Memory:</strong> Click to turn memory on or off.
+            When on, the app uses saved conversation history and saves new messages.
+            Older messages may be shortened into summaries, so some details can be lost.
+            When off, the next request does not use or save conversation memory.
+            Switching it off does not delete existing memory.
+          </li>
+          <li>
+            <strong>Clear Memory:</strong> Deletes saved conversation history.
+            Use Clear Chat to hide messages without deleting that history.
+          </li>
+        </ul>
+        <button class="modal-close-btn" id="closeWelcomeBtn">Okay</button>
+      </div>
     </div>
-  </div>
 
-  <!-- Local Script Execution -->
-  <script src="/script.js"></script>
-</body>
+    <!-- Skill text is rendered as plain text, without executing Markdown HTML. -->
+    <dialog id="skillDialog">
+      <h2 id="skillDialogTitle">Skill</h2>
+      <pre id="skillDialogText"></pre>
+      <form method="dialog">
+        <button class="tool-btn">Close</button>
+      </form>
+    </dialog>
+
+    <!-- Load application handlers after the page elements. -->
+    <script src="/script.js"></script>
+  </body>
 </html>

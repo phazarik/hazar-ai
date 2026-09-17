@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-# ------------------------------------------------------------------------------
-# CLI Query Tool
+# ----------------------------------------------------------------------------
+# CLI query tool
 #
-# Connects to the local LiteLLM Smart Proxy to run terminal-based inferences.
-# Supports file context attachments, skill injection, and memory management.
-# ------------------------------------------------------------------------------
+# Sends terminal requests through the local LiteLLM gateway.
+# Files, optional skills, and saved chats can be added to the prompt.
+# Streams Markdown as it arrives, then saves complete replies and files.
+# Utility flags can inspect skills or manage memory without an LLM call.
+# ----------------------------------------------------------------------------
 
 import argparse
 import requests
@@ -17,199 +19,196 @@ from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.markdown import Markdown
+import uuid
 
-## Dynamically resolve the path to the 'lib' directory so custom modules 
-## can be imported regardless of where the script is executed from.
+## Use a path based on this script so the CLI also works from another folder.
 LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
 sys.path.insert(0, LIB_DIR)
 import memoryManager as mem
 import skillLoader as skills
+from proxyClient import streamCompletion, PROXY_HEADERS, modelInfoUrl
+from tokenOptimizer import optimizeFile, optimizeMessages
+from outputManager import ARTIFACT_PROMPT, captureOutputs
+from systemPrompt import SYSTEM_PROMPT
 
-## Terminal color constants for formatted output
 YELLOW = "\033[33m"
 RED = "\033[31m"
 CYAN = "\033[36m"
-RESET  = "\033[0m"
+RESET = "\033[0m"
 BOLD = "\033[1m"
 
-## The local proxy endpoint and the required authentication header.
-PROXY_URL     = "http://127.0.0.1:4000/chat/completions"
-PROXY_HEADERS = {"Content-Type": "application/json", "Authorization": "Bearer sk-anything"}
-
-# ------------------------------------------------------------------------------
-# Main execution
-# ------------------------------------------------------------------------------
 def main():
     args = parseArguments()
-    
-    ## Check if the user requested a utility command (like checking memory).
-    ## If a utility command was handled, exit early to prevent a full API call.
     if handleUtilityCommands(args): return
-        
-    ## Ensure a valid query string is present for inference.
     if not args.query:
         print(f"{RED}[ERROR] --query is required{RESET}")
         sys.exit(1)
 
-    ##  Process any local files attached via the --file flag.
-    ## The file contents are merged into a single context string.
+    ## Keep raw attachments for memory and build a separate prompt text block.
     fileContexts = {}
-    contextText  = ""
+    contextText = ""
     if args.file: fileContexts, contextText = prepareFileContext(args.file, args.no_memory, args.optimize_tokens)
     else: print(">> No context files attached.")
-
-    ## Append the loaded file contents to the actual prompt.
     finalQuery = args.query
     if contextText: finalQuery += f"\n\nContext files:\n{contextText}"
-        
-    ## Construct the final array of message dictionaries (System -> History -> User).
     messages = buildMessages(finalQuery, args.skill, args.no_memory)
-    
-    ## Send the payload to the proxy and stream the response to the terminal.
+
+    ## Put artifact rules first so attachment text cannot replace the active task.
+    ## Shorten only supported JSON and repeated file blocks.
+    systemMessage = {
+        "role": "system",
+        "content": SYSTEM_PROMPT + "\n" + ARTIFACT_PROMPT,
+    }
+    messages.insert(0, systemMessage)
+    if args.optimize_tokens: messages = optimizeMessages(messages)
     streamResponse(args, messages, finalQuery, fileContexts)
 
-# ------------------------------------------------------------------------------
-# Core logic
-# ------------------------------------------------------------------------------
+# ----------------
+#    Utilities
+# ----------------
 
-## Sets up the argument parser and all available terminal flags.
-## This defines exactly what inputs the script accepts from the command line.
+## Define the CLI model, file, skill, memory, and token options.
 def parseArguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Query the local LiteLLM Smart Proxy.")
-    parser.add_argument("--model",          default="auto")
-    parser.add_argument("--query",          default=None)
-    parser.add_argument("--file",           nargs="*")
-    parser.add_argument("--max-tokens",     type=int, default=900)
-    parser.add_argument("--skill",          default=None, help="Skill to inject (e.g. prompt-master)")
-    parser.add_argument("--skill-inspect",  default=None, metavar="NAME", help="Print full skill text and exit")
-    parser.add_argument("--no-memory",      action="store_true")
-    parser.add_argument("--clear-memory",   action="store_true")
-    parser.add_argument("--memory-status",  action="store_true")
-    parser.add_argument("--list-skills",    action="store_true")
-    parser.add_argument("--optimize-tokens", action="store_true", help="Strip empty lines from files to save context")
+    parser.add_argument("--model", default="auto")
+    parser.add_argument("--query", default=None)
+    parser.add_argument("--file", nargs="*")
+    parser.add_argument("--max-tokens", type=int, default=900)
+    parser.add_argument("--skill", default=None, help="Skill to inject (e.g. prompt-master)")
+    parser.add_argument(
+        "--skill-inspect",
+        default=None,
+        metavar="NAME",
+        help="Print full skill text and exit",
+    )
+    parser.add_argument("--no-memory", action="store_true")
+    parser.add_argument("--clear-memory", action="store_true")
+    parser.add_argument("--memory-status", action="store_true")
+    parser.add_argument("--list-skills", action="store_true")
+    parser.add_argument(
+        "--optimize-tokens",
+        action="store_true",
+        help="Lossless file deduplication and JSON compaction",
+    )
     return parser.parse_args()
 
-## Handles quick commands that just print info or manage memory, then exit.
-## Returns True if a utility command was executed, indicating the main script should stop.
+## Run inspection or memory commands; return True when no completion is needed.
 def handleUtilityCommands(args: argparse.Namespace) -> bool:
-
-    ## Triggers the memory manager to delete cache and history files.
-    if args.clear_memory: 
+    if args.clear_memory:
         mem.clearMemory()
         return True
 
-    ## Fetches memory metrics (token count, cached file paths) and prints them.
+    ## One chat is a user message plus its assistant reply.
     if args.memory_status:
         s = mem.memoryStatus()
-        print(f"Turns in graph   : {s['turns']}")
+        print(f"Chats in memory   : {s['chats']}")
         print(f"Summary          : {s['summaryChars']} chars")
         print(f"Cached files     : {s['cachedFiles']}")
-        for p in s['fileList']: print(f"  - {p}")
+        for p in s["fileList"]:
+            print(f"  - {p}")
         return True
 
-    ## Scans the local skills directory and lists available system prompts.
     if args.list_skills:
         found = skills.listSkills()
         print("Available skills:" if found else "No skills found in ~/.claude/skills/")
-        for s in found: print(f"  - {s}")
+        for s in found:
+            print(f"  - {s}")
         return True
 
-    ## Prints the raw markdown text of a specific skill for debugging.
     if args.skill_inspect:
         text = skills.loadSkill(args.skill_inspect, fullText=True)
         print(text if text else f"Skill '{args.skill_inspect}' not found.")
         return True
-    
+
     return False
 
-## Reads local files, saves them to the file cache, and formats them for the prompt.
-## Returns a dictionary tracking file metadata and a concatenated string of their contents.
-def prepareFileContext(filepaths: list, no_memory: bool, optimize: bool) -> tuple[dict, str]:
+## Read UTF-8 attachments and build delimited reference blocks for the prompt.
+def prepareFileContext(filePaths: list, noMemory: bool, optimize: bool) -> tuple[dict, str]:
     fileContexts = {}
-    contextText  = ""
-    
+    contextText = ""
     print(">> Loading attached files...")
-    for filepath in filepaths:
-        if not os.path.exists(filepath): 
-            print(f"{RED}[ERROR] File not found: {filepath}{RESET}")
+    for filePath in filePaths:
+        if not os.path.exists(filePath):
+            print(f"{RED}[ERROR] File not found: {filePath}{RESET}")
             sys.exit(1)
-            
-        ## Read the file and pass it to the memory manager.
-        ## The manager hashes the content to prevent storing duplicates.
-        with open(filepath) as f: raw = f.read()
-        sha, cached = mem.registerFile(filepath, raw)
-        label = f"{CYAN}(cached){RESET} " if (cached and not no_memory) else "+ "
-        print(f"  {label}{filepath}")
+
+        ## Read text as UTF-8 so file contents stay consistent across clients.
+        with open(filePath, encoding="utf-8") as f: raw = f.read()
         
-        ## Append the file contents into a clearly separated format for the LLM.
-        ## optimizeTokens strips empty lines to save context window space.
-        content_to_use = optimizeTokens(raw) if optimize else raw
-        contextText += f"\n\n--- FILE: {filepath} ---\n{content_to_use}\n--- END ---\n"
-        fileContexts[sha] = {"path": filepath, "content": raw}
-        
+        ## A matching hash changes the cache label; this step does not save memory yet.
+        sha, cached = mem.registerFile(filePath, raw)
+        label = f"{CYAN}(cached){RESET} " if (cached and not noMemory) else "+ "
+        print(f"  {label}{filePath}")
+
+        contentToUse = optimizeFile(raw, filePath) if optimize else raw
+        contextText += f"\n\n--- FILE: {filePath} ---\n{contentToUse}\n--- END ---\n"
+        fileContexts[sha] = {"path": filePath, "content": raw}
+
     return fileContexts, contextText
 
-## Pulls together skills, previous memory history, and the new query into the final message list.
-## This prepares the exact JSON structure expected by the OpenAI-compatible proxy endpoint.
-def buildMessages(finalQuery: str, skill: str, no_memory: bool) -> list:
+## Combine optional skill instructions, saved history, and the active request.
+def buildMessages(finalQuery: str, skill: str, noMemory: bool) -> list:
     messages = []
 
-    # Inject skill instructions as early messages to set the behavior.
+    ## Add the selected installed skill before the conversation history.
     if skill:
-        skillMsgs = skills.buildSkillMessages(skill)
-        if skillMsgs:
+        skillMessages = skills.buildSkillMessages(skill)
+        if skillMessages:
             print(f">> Injecting skill: {skill}")
-            messages.extend(skillMsgs)
+            messages.extend(skillMessages)
         else:
             avail = skills.listSkills()
             print(f"{YELLOW}>> Skill '{skill}' not found.{RESET}")
             if avail: print(f"   Available: {', '.join(avail)}")
 
-    ## Inject prior conversation history unless the --no-memory flag was passed.
-    if not no_memory:
+    ## Skip both the summary and old messages when memory is disabled.
+    if not noMemory:
         history, _ = mem.loadMemory()
         if history:
-            turns = sum(1 for m in history if m["role"] == "user")
-            print(f">> Loaded {turns} chat(s) from memory.")
+            chats = sum(1 for m in history if m["role"] == "user")
+            print(f">> Loaded {chats} chat(s) from memory.")
             messages.extend(history)
         else: print(">> No prior memory. Starting fresh.")
     else: print(">> Memory disabled (--no-memory).")
-    
-    ## Finally, attach the active user prompt at the very end of the list.
+
+    ## Keep the active user request last, after skills and previous messages.
     messages.append({"role": "user", "content": finalQuery})
     return messages
 
-## Retrieves the true context limit size from the local LiteLLM proxy
-def getContextLimit(model_name: str) -> int:
+def getContextLimit(modelName: str) -> int:
+    ## Read model limits from the proxy; use an estimate when metadata is unavailable.
+    ## Use a modest fallback limit if the gateway has no matching model metadata.
     limit = 8192
     try:
-        resp = requests.get("http://127.0.0.1:4000/model/info", headers=PROXY_HEADERS, timeout=2)
+        resp = requests.get(modelInfoUrl(), headers=PROXY_HEADERS, timeout=2)
         if resp.status_code == 200:
             models = resp.json().get("data", [])
             for m in models:
-                if m.get("model_name") == model_name or m.get("id") == model_name:
+                if m.get("model_name") == modelName or m.get("id") == modelName:
                     info = m.get("model_info", {})
-                    found = info.get("max_input_tokens") or m.get("max_input_tokens") or info.get("max_tokens")
-                    if found: 
-                        limit = int(found)
+                    found = (
+                        info.get("max_input_tokens")
+                        or m.get("max_input_tokens")
+                        or info.get("max_tokens")
+                    )
+                    if found: limit = int(found)
                     break
-    except Exception: 
-        pass
-        
+    except Exception: pass
+
+    ## Fallback values:
     if limit == 8192:
-        lower_name = model_name.lower()
+        lower_name = modelName.lower()
         if "gemini" in lower_name: limit = 1048576
         elif "deepseek-r1" in lower_name: limit = 128000
         elif "qwen" in lower_name: limit = 32768
+
     return limit
 
-## Connects to the LLM API, parses the streaming text chunks, and updates the console UI.
-## This function handles the network connection, renders the Markdown via the Rich library,
-## and captures the final token usage.
+## Render streamed Markdown, then save complete output and optional memory.
 def streamResponse(args: argparse.Namespace, messages: list, finalQuery: str, fileContexts: dict):
     print(f">> Sending to proxy (model: {args.model}, messages: {len(messages)})")
-    
-    ## Construct the JSON payload for the proxy.
+
+    ## Ask for streaming text and token usage through the same gateway endpoint.
     payload = {
         "model": args.model,
         "messages": messages,
@@ -217,123 +216,102 @@ def streamResponse(args: argparse.Namespace, messages: list, finalQuery: str, fi
         "stream_options": {"include_usage": True},
         "max_tokens": args.max_tokens,
     }
-
     try:
-        ## Establish the streaming connection to the local LiteLLM server.
-        resp = requests.post(PROXY_URL, headers=PROXY_HEADERS, json=payload, stream=True)
-        resp.raise_for_status()
-        
-        ## Intercept the actual model name directly from the HTTP headers.
-        ## This bypasses the alias grouping problem where 'fast' or 'smart' gets echoed
-        ## instead of the exact provider model ID.
-        actualModel = resp.headers.get("x-litellm-model-name", "unknown")
-        
+        actualModel = "unknown"
         console = Console()
-        reply   = ""
-        pTok = 0
-        cTok = 0
-        tTok = 0
-        
+        reply = ""
+        promptTokens = 0
+        completionTokens = 0
+        totalTokens = 0
+
         print(">> Stream starting...\n")
         if actualModel != "unknown": print(f"{YELLOW}>> Model: {BOLD}{actualModel}{RESET}\n")
         displayLogo(console)
 
-        ## Utilize the Rich Live rendering context to draw and redraw the Markdown panel
-        ## rapidly as chunks stream in from the server.
-        with Live(buildPanel(reply, f"[Connecting...] {actualModel}"), console=console, refresh_per_second=15) as live:
-            
-            ## Read the byte stream from the HTTP socket line by line.
-            for line in resp.iter_lines():
-                if not line: continue
-                lineStr = line.decode("utf-8")
+        ## Rich redraws the Markdown panel as text arrives; reply keeps the full text.
+        with Live(
+            buildPanel(reply, f"[Connecting...] {actualModel}"),
+            console=console,
+            refresh_per_second=15,
+        ) as live:
 
-                ## Check for standard Server-Sent Events (SSE) data formatting.
-                if not lineStr.startswith("data: "): continue
-                dataStr = lineStr[6:]
-                if dataStr == "[DONE]": 
-                    live.update(buildPanel(reply, f"[Done] {actualModel}"))
-                    break
-                data = parseJsonSafe(dataStr)
-                if not data: continue
+            for data in streamCompletion(payload, lambda text: print(f">> {text}")):
 
-                ## Fallback check in case the HTTP header was omitted by the provider.
-                ## Avoid overwriting a valid model name with an alias.
+                ## Ignore tier aliases when looking for the actual provider model name.
                 if actualModel == "unknown" and "model" in data:
                     reported = data["model"]
                     if reported not in ("auto", "fast", "smart"): actualModel = reported
 
-                ## Extract token usage statistics if included in the stream chunk.
+                ## Some providers send usage only in the final event.
                 if "usage" in data and data["usage"]:
-                    u    = data["usage"]
-                    pTok = u.get("prompt_tokens", pTok)
-                    cTok = u.get("completion_tokens", cTok)
-                    tTok = u.get("total_tokens", tTok)
+                    u = data["usage"]
+                    promptTokens = u.get("prompt_tokens", promptTokens)
+                    completionTokens = u.get("completion_tokens", completionTokens)
+                    totalTokens = u.get("total_tokens", totalTokens)
 
-                ## Extract the text fragment and append it to the complete reply string.
+                ## Each content delta is only a fragment, so append it to the running reply.
                 choices = data.get("choices", [])
                 if choices:
                     delta = choices[0].get("delta", {})
                     if "content" in delta: reply += delta["content"]
 
-                ## Force a UI redraw with the newly appended text.
                 live.update(buildPanel(reply, f"[Generating] {actualModel}"))
 
-        ## Post-processing: save the interaction to persistent memory.
-        if not args.no_memory and reply:
-            mem.appendTurn(finalQuery, reply, fileContexts if fileContexts else None)
-            print("\n>> Chat saved to memory.")
-            
-        ## If the API provider did not supply exact token usage, estimate it based
-        ## on word counts to populate the progress bar anyway.
-        if tTok == 0 and reply:
-            cTok = int(len(reply.split()) * 1.3)
-            pTok = int(len(finalQuery.split()) * 1.3)
-            tTok = pTok + cTok
-            
-        ## Display the final usage metrics to the terminal against the context limit
-        context_limit = getContextLimit(actualModel)
-        print(f"\n{formatUsage(pTok, cTok, tTok, context_limit)}\n")
+        ## The stream must finish successfully before response files are captured.
+        if reply:
+            manifest = captureOutputs(reply, str(uuid.uuid4()))
+            if manifest["artifacts"]:
+                print(f"\n>> Outputs: output/{manifest['chatId']}/{manifest['requestId']}")
 
-    except KeyboardInterrupt: 
+        ## Store the chat only after the same successful completion check.
+        if not args.no_memory and reply:
+            mem.appendChat(finalQuery, reply, fileContexts if fileContexts else None)
+            print("\n>> Chat saved to memory.")
+
+        ## Missing usage gets a rough estimate; this is not an exact tokenizer count.
+        if totalTokens == 0 and reply:
+            completionTokens = int(len(reply.split()) * 1.3)
+            promptTokens = int(len(finalQuery.split()) * 1.3)
+            totalTokens = promptTokens + completionTokens
+
+        contextLimit = getContextLimit(actualModel)
+        print(f"\n{formatUsage(promptTokens, completionTokens, totalTokens, contextLimit)}\n")
+
+    except KeyboardInterrupt:
         print(f"\n{YELLOW}>> Stopped.{RESET}")
         sys.exit(0)
-    except requests.exceptions.RequestException as e: 
+    except (requests.exceptions.RequestException, RuntimeError) as e:
         print(f"\n{RED}[ERROR] Proxy request failed: {e}{RESET}")
-        
-# ------------------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------------------
+        sys.exit(1)
 
-## Removes empty lines and spaces from file content to save context tokens.
+## Apply safe file optimization without removing source whitespace.
 def optimizeTokens(content: str) -> str:
-    return "\n".join(line.rstrip() for line in content.splitlines() if line.strip())
+    return optimizeFile(content)
 
-## Prints the stylish ASCII art title using a compact block font to prevent wrapping.
+## Print the terminal title without line wrapping.
 def displayLogo(console: Console):
     ascii_art = pyfiglet.figlet_format("hazar-ai", font="slant")
     console.print(Text(ascii_art, style="bold green"), no_wrap=True)
-    
-## Wraps the streaming text inside a bordered box.
-## If a code block is open (odd number of ```), temporarily closes it
-## to prevent rendering glitches mid-stream.
+
+## Wrap Markdown in a panel and close an unfinished code fence for display.
 def buildPanel(text: str, title: str) -> Panel:
+    ## Close an open fence only for display; the saved reply stays unchanged.
     if text.count("```") % 2 != 0: text += "\n```"
     return Panel(Markdown(text, code_theme="bw"), title=title, border_style="green", width=110)
 
-## Calculates and formats an ASCII progress bar showing how many tokens were used.
-def formatUsage(pTok: int, cTok: int, tTok: int, contextLimit: int) -> str:
-    pct    = (tTok / contextLimit * 100) if contextLimit > 0 else 0
-    filled = min(100, int(100 * tTok / contextLimit)) if contextLimit > 0 else 0
-    bar    = "█" * filled + "░" * (100 - filled)
+## Show prompt and completion usage against the estimated context limit.
+def formatUsage(promptTokens: int, completionTokens: int, totalTokens: int, contextLimit: int) -> str:
+    pct = (totalTokens / contextLimit * 100) if contextLimit > 0 else 0
+    filled = min(100, int(100 * totalTokens / contextLimit)) if contextLimit > 0 else 0
+    bar = "█" * filled + "░" * (100 - filled)
     return (
-        f"Tokens — prompt: {pTok} + completion: {cTok} = total: {tTok}\n"
+        f"Tokens — prompt: {promptTokens} + completion: {completionTokens} = total: {totalTokens}\n"
         f"{bar} {YELLOW}{BOLD}{pct:.1f}%{RESET} of {contextLimit} (Context Limit)"
     )
 
-## Safely tries to parse a JSON string, returning an empty dictionary on failure
-## to prevent catastrophic crashes on corrupted network chunks.
+## Parse JSON and return an empty dictionary if parsing fails.
 def parseJsonSafe(dataStr: str) -> dict:
     try: return json.loads(dataStr)
-    except Exception:  return {}
+    except Exception: return {}
 
 if __name__ == "__main__": main()

@@ -1,124 +1,104 @@
-# -------------------------------------------------------------------
-# Main setup file for the local LiteLLM proxy. This is what
-# turns a bunch of different free API keys (OpenRouter, Gemini,
-# Groq) into one single endpoint at localhost:4000 that looks
-# like a normal OpenAI API.
+# ----------------------------------------------------------------------------
+# Cloud and local gateway routes
 #
-# Three groups of models are defined below:
-#    - "auto"  -> what every tool should actually call. Gets
-#                 rewritten to "fast" or "smart" by router_hook.py
-#                 before the real request goes out.
-#    - "fast"  -> small/cheap free models, tried in order
-#    - "smart" -> bigger free models for harder tasks, tried in order
-#    - "local" -> runs native .gguf models from the local models/ dir.
-#                 If several .gguf files are placed there, start.sh spins
-#                 up one llama.cpp server per model and regenerates
-#                 core/config.local.generated.yaml with a "local:<name>"
-#                 alias for each one (the first model is also kept under
-#                 the plain "local" alias for backward compatibility).
-#                 Run `bash start.sh offline` to use only local models,
-#                 with no cloud API calls at all.
-#
-# If one model in a group hits a rate limit, the proxy skips it
-# for a day and moves to the next one in that group automatically.
-# If every "smart" model is used up, requests drop down to "fast"
-# instead of just failing.
-# -------------------------------------------------------------------
+# Defines the auto, fast, smart, and local aliases used by the clients.
+# auto is rewritten by routerHook.py; healthy deployments rotate in a group.
+# Retry, cooldown, and fallback settings appear near the bottom.
+# start.sh generates separate runtime files when local GGUF models exist.
+# ----------------------------------------------------------------------------
 
 model_list:
-  # Default placeholder for 'auto' (rewritten by routerHook)
+
+  ## Placeholder: the callback replaces auto with the selected tier.
   - model_name: auto
     litellm_params:
       model: gemini/gemini-3.5-flash-lite
       api_key: os.environ/GEMINI_API_KEY
 
-  # =================================================================
-  # FAST GROUP: Tried in sequence; high speed & high rate limits
-  # =================================================================
-  # 1. Google Gemini Direct (Ultra-fast, high free-tier limits)
+  ## Fast-group deployment: a healthy entry can handle lighter requests.
   - model_name: fast
     litellm_params:
       model: gemini/gemini-3.5-flash-lite
       api_key: os.environ/GEMINI_API_KEY
+
   - model_name: fast
     litellm_params:
       model: gemini/gemini-3.5-flash
       api_key: os.environ/GEMINI_API_KEY
+
   - model_name: fast
     litellm_params:
       model: gemini/gemini-3.6-flash
       api_key: os.environ/GEMINI_API_KEY
 
-  # 2. Groq Direct (Near-instant inference speeds)
   - model_name: fast
     litellm_params:
       model: groq/qwen/qwen3.8-27b
       api_key: os.environ/GROQ_API_KEY
+
   - model_name: fast
     litellm_params:
       model: groq/openai/gpt-oss-20b
       api_key: os.environ/GROQ_API_KEY
 
-  # 3. OpenRouter Free Tier (Reliable fallbacks within the fast group)
   - model_name: fast
     litellm_params:
       model: openrouter/google/gemma-4-31b-it:free
       api_key: os.environ/OPENROUTER_API_KEY
+
   - model_name: fast
     litellm_params:
       model: openrouter/google/gemma-4-26b-a4b-it:free
       api_key: os.environ/OPENROUTER_API_KEY
+
   - model_name: fast
     litellm_params:
       model: openrouter/z-ai/glm-5.2:free
       api_key: os.environ/OPENROUTER_API_KEY
 
-  # =================================================================
-  # SMART GROUP: Deep reasoning & coding (slower/larger models)
-  # =================================================================
-  # 1. Google Gemini Pro (State of the art reasoning)
+  ## Smart-group deployment: a healthy entry can handle heavier requests.
   - model_name: smart
     litellm_params:
       model: gemini/gemini-3.1-pro-preview
       api_key: os.environ/GEMINI_API_KEY
-
-  # 2. Groq Large (Fast execution of large architectures)
+  
   - model_name: smart
     litellm_params:
       model: groq/openai/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
-
-  # 3. OpenRouter Frontier & Code Models
+  
   - model_name: smart
     litellm_params:
       model: openrouter/deepseek/deepseek-r1
       api_key: os.environ/OPENROUTER_API_KEY
+  
   - model_name: smart
     litellm_params:
       model: openrouter/qwen/qwen-2.5-coder-32b-instruct
       api_key: os.environ/OPENROUTER_API_KEY
 
-  # =================================================================
-  # LOCAL GROUP: Native GGUF models running via llama.cpp
-  # =================================================================
+  ## Local placeholder: generated configs add every discovered model.
   - model_name: local
     litellm_params:
       model: openai/local
       api_base: http://localhost:8000/v1
       api_key: sk-local
 
-# ===================================================================
-# ROUTING & FALLBACK MECHANICS
-# ===================================================================
+## Retry and fallback policy. The chain is acyclic.
 router_settings:
   routing_strategy: usage-based-routing
-  num_retries: 8
+  num_retries: 2
   allowed_fails: 1
-  cooldown_time: 3600
-
+  cooldown_time: 60
+  enable_pre_call_checks: true
+  fallbacks: [{"auto": ["smart", "fast"]}, {"smart": ["fast"]}]
+  ## Keep fallbacks one-way so routes cannot loop between groups.
+  
+## The callback object is loaded through PYTHONPATH at startup.
 litellm_settings:
   callbacks: ["routerHook.router_hook_instance"]
-  fallbacks: [{"fast": ["smart"]}]
+  request_timeout: 120
 
+## Clients authenticate with the key generated during setup.
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
