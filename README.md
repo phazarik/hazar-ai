@@ -8,12 +8,10 @@ Running cloud models can get expensive, and free tiers have limits. Hazar-AI bri
 
 This is a local chat setup, with a **terminal** interface, a **browser** interface, and a **VS Code** connection through the Continue extension, for **free access to _hazars_ of cloud and local language models**. It puts model choices, file attachments, optional skills, and saved conversations in one setup. If a configured model is temporarily unavailable, the app can try another route before a reply starts. It does not remove provider limits or make paid models free. Costs and access still depend on the selected providers and accounts.
 
-[![Quick start](https://img.shields.io/badge/▶_Quick_start-238636?style=for-the-badge)](https://github.com/phazarik/hazar-ai#first-time-setup)
-[![How it works](https://img.shields.io/badge/How_it_works-30363d?style=for-the-badge)](https://github.com/phazarik/hazar-ai#how-it-works)
-[![CLI examples](https://img.shields.io/badge/CLI_examples-30363d?style=for-the-badge)](https://github.com/phazarik/hazar-ai#cli-examples)
-[![Offline use](https://img.shields.io/badge/Offline_use-30363d?style=for-the-badge)](https://github.com/phazarik/hazar-ai#local-models-and-offline-use)
-[![Compare tools](https://img.shields.io/badge/Compare_tools-30363d?style=for-the-badge)](https://github.com/phazarik/hazar-ai#how-it-compares-against-existing-tools)
-[![Troubleshooting](https://img.shields.io/badge/Troubleshooting-30363d?style=for-the-badge)](https://github.com/phazarik/hazar-ai#when-something-goes-wrong)
+[![Quick start](https://img.shields.io/badge/▶_Quick_start-238636?style=for-the-badge)](https://github.com/phazarik/hazar-ai#first-time-setup) [![Web usage](https://img.shields.io/badge/🌐_Web_usage-0969da?style=for-the-badge)](https://github.com/phazarik/hazar-ai#browser-controls) [![CLI usage](https://img.shields.io/badge/⌨_CLI_usage-0969da?style=for-the-badge)](https://github.com/phazarik/hazar-ai#cli-examples) [![VS Code integration](https://img.shields.io/badge/💻_VS_Code_integration-0969da?style=for-the-badge)](https://github.com/phazarik/hazar-ai#vs-code-integration-continue)
+
+
+[![How it works](https://img.shields.io/badge/⚙_How_it_works-30363d?style=for-the-badge)](https://github.com/phazarik/hazar-ai#how-it-works) [![Offline use](https://img.shields.io/badge/📦_Offline_use-30363d?style=for-the-badge)](https://github.com/phazarik/hazar-ai#local-models-and-offline-use) [![Compare tools](https://img.shields.io/badge/⚖_Compare_tools-30363d?style=for-the-badge)](https://github.com/phazarik/hazar-ai#how-it-compares-against-existing-tools) [![Troubleshooting](https://img.shields.io/badge/🔧_Troubleshooting-30363d?style=for-the-badge)](https://github.com/phazarik/hazar-ai#when-something-goes-wrong)
 
 ## What is included
 
@@ -184,7 +182,8 @@ Setup checks required files, prepares the environment file, makes scripts execut
 - The Continue gateway secret to `~/.continue/.env`.
 - An optional user service to `~/.config/systemd/user/litellm.service`.
 
-Setup does not start the services. It preserves existing provider keys, but **overwrites the generated Continue configuration**. Back up manual Continue changes before rerunning it.
+Setup does not start the services. It preserves existing provider keys, but **overwrites the generated Continue configuration**. Backup manual Continue changes before rerunning it.
+> **Gateway key:** Setup generates `LITELLM_MASTER_KEY` if no valid key exists and saves it in `core/litellm.env`. Later runs retain the saved valid key. For Windows-side Continue, copy this key into the active Continue configuration's `apiKey` field once. Setup running in WSL writes only the Linux-side Continue files.
 
 ### 6. Start and try a message
 
@@ -515,22 +514,39 @@ The browser and CLI rescan local downloads without restarting inference services
 
 Generated configurations are rebuilt automatically. Edit `core/config.yaml` for persistent cloud changes rather than editing generated YAML files.
 
+## VS Code integration: Continue
 
-## VS Code and Continue
+1. Install the [Continue extension](https://marketplace.visualstudio.com/items?itemName=Continue.continue) in VS Code.
+2. Go to its setting and open **Configs**.
+3. Edit the Main Config (or add any other config) by clicking the gear icon, which opens the `config.yaml`. Configure it to connect to the running proxy:
+	```yaml
+	name: hazar-ai
+	version: 1.0.0
+	schema: v1
 
-Install the Continue extension in the VS Code environment that runs the project. In WSL or a container, use that environment's home directory for the generated configuration and secrets.
+	models:
+	  - name: hazar-router
+	    provider: openai
+	    model: auto  # Use fast, smart, local, or an exact registered model alias.
+	    apiBase: http://localhost:4000/v1
+	    apiKey: "PASTE_THE_GENERATED_LITELLM_MASTER_KEY_HERE"
+	    roles:
+	      - chat
+	      - edit
+	```
 
-1. Run `python3 setup.py`.
-2. Start the gateway with `bash start.sh all` or `bash start.sh proxy`.
-3. Load the generated local configuration in Continue and select **local-router**.
+**Gateway key:** The first run of `python3 setup.py` generates `LITELLM_MASTER_KEY` when no valid key exists and saves it in `core/litellm.env`. Copy the complete value into `apiKey` above. Cloud-provider API keys are not used for this connection.
 
-`core/continueConfig.yaml` is a reference file. The active file written by setup is `~/.continue/config.yaml`; its key comes from `~/.continue/.env`.
+Normal application restarts and later setup runs retain the saved valid key. Continue requires a key update only if that key changes. However, setup overwrites its generated Continue YAML, so back up manual configuration changes before rerunning it.
 
-Continue connects directly to the gateway. It shares the configured routing and generated personality rules, but **does not use Hazar-AI's saved conversation memory, skill selector, file-capture logic, or browser controls**. Continue manages its own chat context and tools.
+Save the configuration, reload the VS Code window, and select **hazar-router** in Continue. For local-only operation, change `model: auto` to `model: local`.
 
-Personality rules apply to Continue's Chat, Agent, and Edit requests. Rules do not apply to autocomplete or Apply, and Agent mode also depends on the selected model and gateway supporting tools. See [Continue's rule guide](https://docs.continue.dev/customize/deep-dives/rules).
+> **WSL:** VS Code can remain installed on Windows. Opening the project through the WSL extension and installing Continue in that WSL window uses the Linux configuration. Continue running in a regular Windows window uses the Windows configuration instead. `localhost:4000` normally reaches the proxy running in WSL. Running setup in WSL does not update Windows-side Continue files.
 
-For offline Continue use, start `bash start.sh offline` and change the generated model setting from `auto` to `local` or an exact registered `local:<relative-path>` identifier. GGUF identifiers include `.gguf`. Restart offline mode after adding or removing models so the gateway aliases are regenerated. Rerunning setup restores the generated `auto` setting.
+The configuration normally resides at `~/.continue/config.yaml` on Linux/WSL or `%USERPROFILE%\.continue\config.yaml` on Windows. Keep configurations containing the gateway key private and outside Git.
+
+Continue uses the proxy's model routes but manages its own context, separate from Hazar-AI's browser and CLI memory.
+
 
 ## Customize the setup
 
