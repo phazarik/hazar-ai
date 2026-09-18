@@ -418,6 +418,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         const parsedHTML = marked.parse(msg.content);
                         if (window.DOMPurify) msgBox.innerHTML = DOMPurify.sanitize(parsedHTML);
                         else msgBox.textContent = msg.content;
+                        addReplyCopyButtons(msgBox, msg.content);
 
                         // Apply syntax highlighting to code blocks
                         msgBox.querySelectorAll("pre code").forEach((block) => {
@@ -605,6 +606,100 @@ function appendLog(text, isError = false) {
     logs.scrollTop = logs.scrollHeight; // Auto-scroll logs to bottom
 }
 
+// Copy plain source text, with a fallback for browsers without Clipboard API access.
+async function copyReplyText(text) {
+    if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return;
+        } catch (error) {
+            // Try the selection-based fallback if clipboard permission is unavailable.
+        }
+    }
+    const activeElement = document.activeElement;
+    const selection = window.getSelection();
+    const ranges = [];
+    if (selection) {
+        for (let index = 0; index < selection.rangeCount; index++) {
+            ranges.push(selection.getRangeAt(index).cloneRange());
+        }
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.className = "clipboard-fallback";
+    textarea.setAttribute("readonly", "");
+    document.body.appendChild(textarea);
+    try {
+        textarea.focus({ preventScroll: true });
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+        if (!document.execCommand("copy")) throw new Error("Clipboard copy failed");
+    } finally {
+        textarea.remove();
+        if (activeElement && activeElement.focus) activeElement.focus({ preventScroll: true });
+        if (selection) {
+            selection.removeAllRanges();
+            ranges.forEach((range) => selection.addRange(range));
+        }
+    }
+}
+
+// Keep copy controls outside the source text and provide accessible icon-only feedback.
+function createReplyCopyButton(getText, label) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "reply-copy-btn";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    const icon = document.createElement("i");
+    icon.className = "bi bi-copy";
+    icon.setAttribute("aria-hidden", "true");
+    button.appendChild(icon);
+    button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+            await copyReplyText(getText());
+            icon.className = "bi bi-check2";
+            button.title = "Copied";
+            button.setAttribute("aria-label", "Copied");
+        } catch (error) {
+            icon.className = "bi bi-exclamation-triangle";
+            button.title = "Copy failed; try again";
+            button.setAttribute("aria-label", "Copy failed; try again");
+            appendLog("Could not copy to clipboard. Please try again.", true);
+        } finally {
+            button.disabled = false;
+            setTimeout(() => {
+                icon.className = "bi bi-copy";
+                button.title = label;
+                button.setAttribute("aria-label", label);
+            }, 1500);
+        }
+    });
+    return button;
+}
+
+// Add one control for the original Markdown reply and one for each displayed code block.
+function addReplyCopyButtons(msgBox, markdown) {
+    msgBox.dataset.markdownSource = markdown;
+    const label = msgBox.parentElement.querySelector(".msg-label");
+    if (!label.querySelector(".reply-copy-btn")) {
+        label.appendChild(createReplyCopyButton(
+            () => msgBox.dataset.markdownSource, "Copy Markdown reply",
+        ));
+    }
+    msgBox.querySelectorAll("pre").forEach((pre) => {
+        if (pre.parentElement.classList.contains("reply-code-block")) return;
+        const wrapper = document.createElement("div");
+        wrapper.className = "reply-code-block";
+        pre.parentNode.insertBefore(wrapper, pre);
+        wrapper.appendChild(pre);
+        wrapper.appendChild(createReplyCopyButton(
+            () => (pre.querySelector("code") || pre).textContent, "Copy block",
+        ));
+    });
+}
+
 // Builds the HTML structure for a new message bubble (either user or AI) in the main chat history.
 // Create one message container and return its content element for rendering.
 function createMsgBox(role) {
@@ -790,6 +885,7 @@ async function sendQuery() {
 
                     // Clean the HTML using DOMPurify to prevent malicious script injection.
                     morpheusBox.innerHTML = DOMPurify.sanitize(parsedHTML);
+                    addReplyCopyButtons(morpheusBox, reply);
 
                     if (isAtBottom) {
                         historyContainer.scrollTop = historyContainer.scrollHeight;

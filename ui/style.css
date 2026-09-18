@@ -8,6 +8,12 @@
    Static presentation stays here; the HTML contains no inline styles.
 ---------------------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------------------
+   Theme variables
+
+   Defines shared colors, typography, spacing values, and corner rounding used throughout the interface.
+---------------------------------------------------------------------------- */
+
 /* Shared theme values. Panels, controls, and messages reuse these variables. */
 :root {
     --bg: #050505; /* Main page background. */
@@ -35,6 +41,12 @@
     --font-weight-emphasis: 400;
     --line-height: 1.5;
 }
+
+/* ----------------------------------------------------------------------------
+   Page defaults and typography
+
+   Sets the page background and sizing, aligns native controls with the shared font, and defines heading sizes and text weights.
+---------------------------------------------------------------------------- */
 
 /* Remove default page spacing and fill the browser window. */
 html,
@@ -90,6 +102,12 @@ h6 {
     font-size: var(--font-size-base);
 }
 
+/* ----------------------------------------------------------------------------
+   Generation activity animation
+
+   Defines the repeating pulse animation and applies it to the indicator shown while Morpheus generates a reply.
+---------------------------------------------------------------------------- */
+
 /* Fade and scale the activity indicator while a reply is running. */
 @keyframes pulse {
     /* Start the pulse dim and slightly smaller. */
@@ -115,6 +133,12 @@ h6 {
 .pulsate {
     animation: pulse 1.5s infinite ease-in-out;
 }
+
+/* ----------------------------------------------------------------------------
+   Application shell and header
+
+   Fills the viewport and arranges the header, logo, title, and profile link above the main interface.
+---------------------------------------------------------------------------- */
 
 /* Stack the header above the chat and diagnostic area. */
 .app {
@@ -180,6 +204,12 @@ header {
 .header-profile:hover {
     color: var(--text);
 }
+
+/* ----------------------------------------------------------------------------
+   Chat layout and prompt resize handle
+
+   Divides the remaining viewport space between chat and diagnostics, keeps history scrollable, and styles the prompt resize handle and file drop target.
+---------------------------------------------------------------------------- */
 
 /* Chat and diagnostics share the remaining height.
    The outer area clips overflow; chat and logs scroll inside their own panels.
@@ -247,6 +277,12 @@ body.resizing-chat .chat-resize-handle {
     outline: 2px dashed var(--accent);
     outline-offset: -4px; /* Keep the drag highlight inside the app edge. */
 }
+
+/* ----------------------------------------------------------------------------
+   Chat messages and Markdown content
+
+   Styles role labels, timestamps, message spacing, Markdown paragraphs, code blocks, and tables while preserving user-entered whitespace.
+---------------------------------------------------------------------------- */
 
 /* Separate chat messages and mark their left edge. */
 .msg {
@@ -335,6 +371,12 @@ body.resizing-chat .chat-resize-handle {
     padding: 8px;
     text-align: left;
 }
+
+/* ----------------------------------------------------------------------------
+   Prompt area and primary controls
+
+   Styles the footer, prompt textarea, attachment picker, generation indicator, action buttons, and send shortcut hint.
+---------------------------------------------------------------------------- */
 
 /* Separate the prompt area from chat history. */
 footer {
@@ -426,6 +468,12 @@ button:hover {
     font-family: var(--font);
 }
 
+/* ----------------------------------------------------------------------------
+   Queued attachments
+
+   Arranges attached files as wrapping chips and styles the links used to remove individual files from the queue.
+---------------------------------------------------------------------------- */
+
 /* Let attached-file chips wrap when several files are queued. */
 .file-context {
     font-size: var(--font-size-small);
@@ -459,6 +507,12 @@ button:hover {
 .file-chip-remove:hover {
     color: var(--accent);
 }
+
+/* ----------------------------------------------------------------------------
+   Dragging states and diagnostic resize handle
+
+   Prevents accidental text selection during resizing and styles the desktop divider, grip, and interaction states.
+---------------------------------------------------------------------------- */
 
 /* Avoid selecting page text while a handle is dragged. */
 body.resizing-chat,
@@ -504,6 +558,12 @@ body.resizing-panel {
 body.resizing-panel .panel-resize-handle {
     background-color: var(--border);
 }
+
+/* ----------------------------------------------------------------------------
+   Diagnostics and token usage
+
+   Arranges the diagnostic panel, scrolling log entries, usage metrics, and animated token progress bar.
+---------------------------------------------------------------------------- */
 
 /* Keep a steady desktop width and stack logs above usage stats. */
 .right-panel {
@@ -578,6 +638,12 @@ body.resizing-panel .panel-resize-handle {
     width: 0%; /* Starts empty; JavaScript updates the used-token percentage. */
     transition: width 0.3s ease; /* Smooth changes between hover, active, or usage states. */
 }
+
+/* ----------------------------------------------------------------------------
+   Toolbar and generation settings
+
+   Groups model, skill, and memory controls and styles their labels, selection states, dropdowns, token-limit checkbox, and numeric field.
+---------------------------------------------------------------------------- */
 
 /* Group model, skill, and memory controls; wrap groups on smaller widths. */
 .toolbar-row {
@@ -704,6 +770,12 @@ select.tool-btn option {
     cursor: not-allowed;
 }
 
+/* ----------------------------------------------------------------------------
+   Help popup
+
+   Displays the centered help overlay, controls dismissal visibility, and keeps explanatory content readable and scrollable.
+---------------------------------------------------------------------------- */
+
 /* Cover the page and center the welcome popup above the interface. */
 .modal-overlay {
     position: fixed; /* Keep the popup attached to the viewport. */
@@ -777,6 +849,12 @@ select.tool-btn option {
     justify-content: center;
 }
 
+/* ----------------------------------------------------------------------------
+   Generated file downloads
+
+   Allows generated-file links to wrap and keeps long filenames from stretching the chat column.
+---------------------------------------------------------------------------- */
+
 /* Let response-file download links wrap onto another line. */
 .output-downloads {
     display: flex;
@@ -790,6 +868,12 @@ select.tool-btn option {
     color: var(--accent);
     overflow-wrap: anywhere; /* Wrap long words or filenames instead of widening the panel. */
 }
+
+/* ----------------------------------------------------------------------------
+   Skill inspection dialog
+
+   Themes the skill dialog and backdrop and preserves source line breaks while wrapping long lines.
+---------------------------------------------------------------------------- */
 
 /* Keep full skill inspection in a scrollable, themed popup. */
 #skillDialog {
@@ -811,6 +895,82 @@ select.tool-btn option {
     overflow-wrap: anywhere; /* Wrap long words or filenames instead of widening the panel. */
     font-family: var(--font);
 }
+
+/* ----------------------------------------------------------------------------
+   Morpheus copy controls
+
+   Positions an icon-only copy button on the reply label and on each code block, with room beside code and visible hover and keyboard focus states.
+---------------------------------------------------------------------------- */
+
+/* Anchor the Markdown copy control to the top-right of the reply label. */
+.msg.morpheus .msg-label {
+    position: relative;
+    padding-right: 44px;
+    min-height: 36px;
+}
+
+/* Keep each code copy control fixed while the code itself scrolls horizontally. */
+.msg.morpheus .reply-code-block {
+    position: relative;
+    min-width: 0;
+}
+
+.msg.morpheus .reply-code-block pre {
+    /* Reserve horizontal room for the icon without adding a blank row above code. */
+    padding-right: 44px;
+}
+
+/* Match the existing theme with a keyboard- and touch-accessible icon button. */
+.msg.morpheus .reply-copy-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    z-index: 1;
+}
+
+.msg.morpheus .reply-copy-btn:hover,
+.msg.morpheus .reply-copy-btn:focus-visible {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.msg.morpheus .reply-copy-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* ----------------------------------------------------------------------------
+   Clipboard fallback
+
+   Places the temporary clipboard textarea outside the visible viewport so copying does not alter the page layout.
+---------------------------------------------------------------------------- */
+
+/* Keep the legacy clipboard selection outside the visible page. */
+.clipboard-fallback {
+    position: fixed;
+    top: 0;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+}
+
+/* ----------------------------------------------------------------------------
+   Mobile overrides
+
+   Adapts layout, diagnostic resizing, controls, input height, and header wrapping for screens up to 768px. This section stays last so its rules follow the shared styles.
+---------------------------------------------------------------------------- */
 
 /* Mobile layout
    Stack diagnostics below chat and change its drag direction to vertical.
