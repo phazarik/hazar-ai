@@ -74,7 +74,8 @@ def loadSkill(name: str, fullText: bool = False) -> str | None:
 ## Build an optional system message without changing the active task.
 ## Mark the skill as optional and keep the active user task in charge.
 def buildSkillMessages(name: str) -> list[dict] | None:
-    text = loadSkill(name)
+    #text = loadSkill(name)
+    text = loadSkill(name, fullText=True) ## -> Change this for putting an upper cap on skill length.
     if text is None: return None
     content = f"[OPTIONAL SKILL: {name}]\n{text}\nFollow the active user task."
     return [{"role": "system", "content": content}]

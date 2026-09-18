@@ -94,10 +94,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Allow pressing "Shift+Enter" or "Ctrl+Enter" to send, but regular "Enter" to just make a new line.
+    // Ctrl+Enter sends; Enter and Shift+Enter or single Enter insert a new line.
     const queryInput = document.getElementById("queryInput");
     queryInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && (e.shiftKey || e.ctrlKey)) {
+	if (e.key === "Enter" && e.ctrlKey && !e.shiftKey) {
             e.preventDefault(); // Prevents adding a rogue newline character before sending
             if (!isGenerating) sendQuery();
         }
