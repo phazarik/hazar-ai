@@ -79,7 +79,7 @@
                 <button type="button" class="tool-btn active" data-model="auto" title="Choose a model automatically">Automatic</button>
                 <button type="button" class="tool-btn" data-model="fast" title="For quick, everyday questions">Quick</button>
                 <button type="button" class="tool-btn" data-model="smart" title="For harder questions and detailed work">Detailed</button>
-                <button type="button" class="tool-btn" data-model="local" title="Use a model installed on this device">On this device</button>
+                <button type="button" class="tool-btn" data-model="local" title="Use a model installed on this device">Local</button>
 
                 <!-- Skill Selector placed right next to the model buttons -->
                 <span class="tool-label skill-label">Skill:</span>
@@ -94,15 +94,7 @@
                 <input type="number" id="maxTokensInput" class="tool-btn" value="900" title="Maximum generated tokens">
               </div>
               <div class="tool-group">
-                <span class="tool-label">CONTROLS:</span>
-                <button type="button" class="tool-btn" id="helpBtn" title="Show Help/Welcome Modal">
-                  <i class="bi bi-question-circle"></i>
-                  <span class="btn-text">Help</span>
-                </button>
-                <button type="button" class="tool-btn" id="memStatusBtn" title="Check Memory Status">
-                  <i class="bi bi-info-circle"></i>
-                  <span class="btn-text">Status</span>
-                </button>
+                <span class="tool-label">Controls:</span>
                 <button type="button" class="tool-btn" id="optimizeTokensBtn" title="Lossless file deduplication and JSON compaction">
                   <i class="bi bi-lightning-charge"></i>
                   <span class="btn-text">Optimize: OFF</span>
@@ -118,6 +110,15 @@
 		<button type="button" class="tool-btn" id="clearMemoryBtn" title="Wipe conversation history">
                   <i class="bi bi-trash"></i>
                   <span class="btn-text">Clear Memory</span>
+                </button>
+		<span class="tool-label">Info:</span>
+		<button type="button" class="tool-btn" id="helpBtn" title="Show Help/Welcome Modal">
+                  <i class="bi bi-question-circle"></i>
+                  <span class="btn-text">Help</span>
+                </button>
+                <button type="button" class="tool-btn" id="memStatusBtn" title="Check Memory Status">
+                  <i class="bi bi-info-circle"></i>
+                  <span class="btn-text">Status</span>
                 </button>
               </div>
             </div>
@@ -139,7 +140,7 @@
                 <button id="sendBtn"><i class="bi bi-send"></i>
                   <span class="btn-text">Send</span>
 		</button>
-                <span class="send-hint">Ctrl/Shift + Enter</span>
+                <span class="send-hint">Ctrl + Enter</span>
               </div>
             </div>
           </footer>
@@ -179,75 +180,37 @@
           <i class="bi bi-question-circle"></i>
           Help
         </h2>
-        <p>Here is what each option does:</p>
+        <p>Here is some important things to tweak:</p>
         <ul>
           <li>
             <strong>Model:</strong> "Automatic" picks a model based on the question.
-            "Quick" suits everyday questions. "Detailed" suits harder tasks.
-            "On this device" uses an installed model and needs the local model server running.
+	    "Quick" suits everyday questions. "Detailed" suits harder tasks.
+	    "Local" uses an installed model and needs the local model server running.
           </li>
           <li>
-            <strong>Skill:</strong> Adds instructions for a particular task.
-            "None" adds no extra instructions. "prompt-master" helps write prompts;
-            "ponytail-lite" helps produce short, complete code. Available choices depend on installed skills.
+            <strong>Skill:</strong> Adds instructions for a particular task. Use the dropdown
+	    menu to pick instructions sets. Make sure that tey are kept in the format
+	    <code>~/.claude/skills/skill-name/SKILL.md</code>
           </li>
           <li>
-            <strong>View skill:</strong> Opens the selected skill's instructions for reading.
-            This does not send a message. Only the first 3,000 characters are included with a request.
-          </li>
-          <li>
-            <strong>Max Tokens:</strong> Sets the maximum reply length.
-            Tokens are small pieces of text. A larger number allows a longer reply;
+            <strong>Max Tokens:</strong> Sets the maximum reply length. A larger number allows a longer reply;
             a smaller number may cut it short. Uncheck to use the model's default limit.
-          </li>
-          <li>
-            <strong>Status:</strong> Shows information about saved conversation memory in the log panel.
           </li>
           <li>
             <strong>Optimize:</strong> Click to turn file optimization on or off.
             When on, repeated file content is sent once, and unnecessary spacing in valid JSON is removed.
             Code and comments stay intact. This can reduce the amount of text sent to the model.
           </li>
-          <li>
-            <strong>Attach file:</strong> Adds files to the next message.
-            Files can also be dragged onto the page. Remove an attached file before sending
-            if it should not be included.
-          </li>
-          <li>
-            <strong>Send / Stop:</strong> Send submits the message and attached files.
-            While a reply is being written, the button changes to Stop.
-            Stop cancels the reply and restores the message and attachments for another attempt.
-            Text already received stays visible.
-          </li>
-          <li>
-            <strong>Clear Chat:</strong> Removes messages from the screen without deleting saved memory.
-            Saved messages may return after refreshing the page.
-          </li>
-          <li>
-            <strong>Generated files:</strong> Code snippets in completed replies appear with download links.
-            Click a link to save the file. Copies are also kept in the app's output folder.
-          </li>
-          <li>
-            <strong>When a model is busy:</strong> The app may try another configured model.
-            If the reply still fails, the message and attachments are restored for another attempt.
-            Any partial reply stays visible, but is not saved to memory or turned into downloadable files.
-          </li>
-          <li>
-            <strong>Add or remove skills:</strong> Keep each skill in
-            ~/.claude/skills/&lt;skill-name&gt;/SKILL.md.
-            Add or remove a skill folder, then refresh the page to update the choices.
-          </li>
-          <li>
-            <strong>OmniRoute:</strong> There is no button for this.
-            It is an optional server setup that connects the app to models through another service.
-            Once configured, the same chat controls work as usual.
-          </li>
-          <li>
+	  <li>
             <strong>Memory:</strong> Click to turn memory on or off.
             When on, the app uses saved conversation history and saves new messages.
             Older messages may be shortened into summaries, so some details can be lost.
             When off, the next request does not use or save conversation memory.
             Switching it off does not delete existing memory.
+          </li>
+          <li>
+            <strong>Clear Chat:</strong> Removes messages from the screen without deleting saved memory.
+            Saved messages may return after refreshing the page.
           </li>
           <li>
             <strong>Clear Memory:</strong> Deletes saved conversation history.
