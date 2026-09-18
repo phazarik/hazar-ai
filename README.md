@@ -557,8 +557,14 @@ SYSTEM_PROMPT = (
     "Never use emojis."
 )
 ```
+The GUI labels **NEO** and **MORPHEUS** are set separately in `createMsgBox(role)` inside `ui/script.js`. To change their displayed names, add this before the `label.innerHTML` assignment:
+```javascript
+    // Display names are separate from the internal roles used for styling.
+    const displayName = role === "neo" ? "USER" : "ASSISTANT";
+```
+In the following `label.innerHTML` assignment, replace `${role.toUpperCase()}` with `${displayName}`. Change `"USER"` and `"ASSISTANT"` to the preferred names. Keep the internal `neo` and `morpheus` roles unchanged because CSS and other interface logic depend on them. Update the names in `SYSTEM_PROMPT` separately to change the model's personality.
 
-Restart the web backend after a change. The next CLI invocation reads it automatically. Rerun setup to copy the updated personality into Continue, preserving any manual Continue configuration changes first.
+Restart/refresh the web backend after a change. The next CLI invocation reads the system prompt automatically. Rerun setup to copy the updated personality into Continue, preserving any manual Continue configuration changes first.
 
 ### Font and theme
 
