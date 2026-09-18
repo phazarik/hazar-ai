@@ -1,0 +1,52 @@
+# Install Python dependencies, check syntax and undefined names, and run tests.
+# https://docs.github.com/en/actions/tutorials/build-and-test-code/python
+
+name: Python package
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install flake8 pytest
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          fi
+
+      - name: Lint with flake8
+        run: |
+          # Stop the build for Python syntax errors or undefined names.
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Report style issues as warnings without failing the build.
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Test with pytest
+        run: |
+          # Allow an empty test suite, but preserve every other failure.
+          status=0
+          python -m pytest || status=$?
+          if [ "$status" -eq 5 ]; then
+            echo "No tests collected; skipping."
+          else
+            exit "$status"
+          fi
