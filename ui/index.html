@@ -232,14 +232,16 @@
 	    "Local" lists supported models in models/. One model loads at a time.
 	    Local inference has no provider quota, but the context window remains finite.
           </li>
+	  <li>
+            <strong>Local LLMs:</strong> Place complete GGUF files or supported
+            Transformers model folders in <code>models/</code> directory.
+            Select "Local", then choose a model from the dropdown.
+            Only one model loads at a time to conserve memory.
+          </li>
           <li>
             <strong>Skill:</strong> Adds instructions for a particular task. Use the dropdown
 	    menu to pick instructions sets. Make sure that tey are kept in the format
 	    <code>~/.claude/skills/skill-name/SKILL.md</code>
-          </li>
-          <li>
-            <strong>Max Tokens:</strong> Sets the maximum reply length. A larger number allows a longer reply;
-            a smaller number may cut it short. Uncheck to use the model's default limit.
           </li>
           <li>
             <strong>Optimize:</strong> Click to turn file optimization on or off.
@@ -252,6 +254,10 @@
             Older messages may be shortened into summaries, so some details can be lost.
             When off, the next request does not use or save conversation memory.
             Switching it off does not delete existing memory.
+          </li>
+	  <li>
+            <strong>Max Tokens:</strong> Sets the maximum reply length. A larger number allows a longer reply;
+            a smaller number may cut it short. Uncheck to use the model's default limit.
           </li>
           <li>
             <strong>Clear Chat:</strong> Removes messages from the screen without deleting saved memory.
