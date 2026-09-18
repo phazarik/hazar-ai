@@ -33,18 +33,7 @@ This setup sends prompts and receives replies. It does not automatically run gen
 
 ![Cat cartoon](.image/cartoon.png)
 
-- **One setup, a few ways to chat.** Use a terminal, a browser, or the gateway from Continue in VS Code.
-- **Keep everyday tasks simple.** Start with `auto`, or pick `fast`, `smart`, or an installed local model yourself.
-- **Bring your own context.** Add text files and a task-specific skill without setting up a coding agent.
-- **Keep useful output.** Copy a reply as Markdown, copy an individual block, or download larger generated text files. Reuse saved conversation context across the CLI and browser.
-- **Choose where inference runs.** Use configured cloud providers, GGUF models, or supported complete Transformers model folders on your own device.
-- **Make it your own.** The browser uses plain HTML, JavaScript, and CSS. Routing, memory, skills, and output capture live in separate Python files, so you can find and change a specific behavior.
-
-Use it when you want to ask questions, attach a few source files, get suggestions or complete text files, and decide which changes to apply yourself. The main reason to choose Hazar-AI is this combination of personal chat, shared CLI/browser context, text skills, and reusable output in a setup you can edit. You still manage model availability, provider keys, hardware, and the quality of generated answers.
-
-### How it compares against existing tools
-
-These tools cover different parts of the workflow. OmniRoute focuses on the gateway, Open WebUI on browser chat, and Aider on editing a codebase. Ponytail supplies coding guidance and can complement a chat or coding tool. This comparison uses the supplied Hazar-AI codebase and the linked upstream documentation, checked on September 18, 2026. It is not a speed, quality, or cost benchmark.
+Let's compare it against different things that are already present. OmniRoute focuses on the gateway, Open WebUI on browser chat, and Aider on editing a codebase. Ponytail supplies coding guidance and can complement a chat or coding tool. This comparison uses the supplied Hazar-AI codebase and the linked upstream documentation, checked on September 18, 2026. It is not a speed, quality, or cost benchmark.
 
 <table>
 <thead><tr><th>Tool</th><th>Advantages</th><th>Disadvantages / tradeoffs</th><th>Good fit</th></tr></thead>
