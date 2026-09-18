@@ -897,23 +897,38 @@ async function sendQuery() {
                         hljs.highlightElement(block);
                     });
 
-                    // Update token usage bar to show remaining tokens based on the reported or estimated context limit
-                    try {
-                        const stats = JSON.parse(data);
-                        const limit = stats.contextLimit || 8192;
-                        const used = stats.totalTokens || 0; // Tracks both prompt and completion tokens
+                    // Show usage against the reported input limit; unavailable limits stay unknown.
+		    try {
+			const stats = JSON.parse(data);
+			const limit = stats.contextLimit;
+			const promptTokens = stats.promptTokens || 0;
+			const completionTokens = stats.completionTokens || 0;
+			const statsText = document.getElementById("statsText");
+			const bar = document.getElementById("tokBarFill");
 
-                        const free = Math.max(0, limit - used);
-                        const pct = limit > 0 ? Math.min(100, (used / limit) * 100).toFixed(1) : 0;
+			const usage =
+			      `Model: ${stats.model} | Prompt: ${promptTokens.toLocaleString()}` +
+			      ` | Reply: ${completionTokens.toLocaleString()}`;
 
-                        // Update the text and the progress bar fill
-                        document.getElementById("statsText").textContent =
-                            `Model: ${stats.model} | Free Tokens: ${free.toLocaleString()} (${pct}% used)`;
-                        document.getElementById("tokBarFill").style.width = `${pct}%`;
-                    } catch (err) {
-                        appendLog("Failed to parse runtime stats", true);
-                    }
-                } else if (eventType === "error") {
+			if (Number.isFinite(limit) && limit > 0) {
+			    const pct = Math.max(0, (promptTokens / limit) * 100);
+			    statsText.textContent =
+				`${usage} | Input limit: ${limit.toLocaleString("en-US")}` +
+				` (${pct.toFixed(2)}% used)`;
+			    bar.style.width = `${Math.min(100, pct)}%`;
+			    bar.parentElement.hidden = false;
+			}
+			else {
+			    statsText.textContent = `${usage} | Input limit: unknown`;
+			    bar.style.width = "0%";
+			    bar.parentElement.hidden = true;
+			}
+		    }
+		    catch (err) {
+			appendLog("Failed to parse runtime stats", true);
+		    }
+                }
+		else if (eventType === "error") {
                     terminalEvent = true;
                     appendLog(`ERROR: ${data}`, true);
                     if (!reply) morpheusBox.textContent = `Generation failed: ${data}`;

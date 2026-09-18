@@ -27,7 +27,7 @@ sys.path.insert(0, LIB_DIR)
 import memoryManager as mem
 import skillLoader as skills
 from proxyClient import streamCompletion, PROXY_HEADERS, modelInfoUrl
-from tokenOptimizer import optimizeFile, optimizeMessages
+from tokenOptimizer import optimizeFile, optimizeMessages, getContextLimit
 from outputManager import ARTIFACT_PROMPT, captureOutputs
 from systemPrompt import SYSTEM_PROMPT
 
@@ -175,35 +175,6 @@ def buildMessages(finalQuery: str, skill: str, noMemory: bool) -> list:
     messages.append({"role": "user", "content": finalQuery})
     return messages
 
-def getContextLimit(modelName: str) -> int:
-    ## Read model limits from the proxy; use an estimate when metadata is unavailable.
-    ## Use a modest fallback limit if the gateway has no matching model metadata.
-    limit = 8192
-    try:
-        resp = requests.get(modelInfoUrl(), headers=PROXY_HEADERS, timeout=2)
-        if resp.status_code == 200:
-            models = resp.json().get("data", [])
-            for m in models:
-                if m.get("model_name") == modelName or m.get("id") == modelName:
-                    info = m.get("model_info", {})
-                    found = (
-                        info.get("max_input_tokens")
-                        or m.get("max_input_tokens")
-                        or info.get("max_tokens")
-                    )
-                    if found: limit = int(found)
-                    break
-    except Exception: pass
-
-    ## Fallback values:
-    if limit == 8192:
-        lower_name = modelName.lower()
-        if "gemini" in lower_name: limit = 1048576
-        elif "deepseek-r1" in lower_name: limit = 128000
-        elif "qwen" in lower_name: limit = 32768
-
-    return limit
-
 ## Render streamed Markdown, then save complete output and optional memory.
 def streamResponse(args: argparse.Namespace, messages: list, finalQuery: str, fileContexts: dict):
     print(f">> Sending to proxy (model: {args.model}, messages: {len(messages)})")
@@ -299,14 +270,20 @@ def buildPanel(text: str, title: str) -> Panel:
     if text.count("```") % 2 != 0: text += "\n```"
     return Panel(Markdown(text, code_theme="bw"), title=title, border_style="green", width=110)
 
-## Show prompt and completion usage against the estimated context limit.
-def formatUsage(promptTokens: int, completionTokens: int, totalTokens: int, contextLimit: int) -> str:
-    pct = (totalTokens / contextLimit * 100) if contextLimit > 0 else 0
-    filled = min(100, int(100 * totalTokens / contextLimit)) if contextLimit > 0 else 0
+## Show token usage and compare prompt tokens with the reported input limit.
+def formatUsage(promptTokens: int, completionTokens: int, totalTokens: int, contextLimit: int | None) -> str:
+    usage = (
+        f"Tokens — prompt: {promptTokens} + completion: "
+        f"{completionTokens} = total: {totalTokens}\n"
+    )
+    if contextLimit is None or contextLimit <= 0: return usage + "Input-token limit: unknown"
+    pct = promptTokens / contextLimit * 100
+    filled = max(0, min(100, int(pct)))
     bar = "█" * filled + "░" * (100 - filled)
     return (
-        f"Tokens — prompt: {promptTokens} + completion: {completionTokens} = total: {totalTokens}\n"
-        f"{bar} {YELLOW}{BOLD}{pct:.1f}%{RESET} of {contextLimit} (Context Limit)"
+        usage
+        + f"{bar} {YELLOW}{BOLD}{pct:.2f}%{RESET} "
+        + f"of {contextLimit:,} reported input tokens"
     )
 
 ## Parse JSON and return an empty dictionary if parsing fails.

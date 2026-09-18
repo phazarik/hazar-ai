@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(BASE_DIR, "lib"))
 import memoryManager as mem
 import skillLoader as skills
 from proxyClient import streamCompletion, PROXY_HEADERS, modelInfoUrl
-from tokenOptimizer import optimizeMessages
+from tokenOptimizer import optimizeMessages, getContextLimit
 from outputManager import (
     ARTIFACT_PROMPT,
     captureOutputs,
@@ -159,35 +159,6 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
-
-    ## Read model limits from the proxy; use an estimate when metadata is unavailable.
-    ## Use gateway metadata when available; fallback values are estimates.
-    def getContextLimit(self, modelName: str) -> int:
-        limit = 8192
-        try:
-            resp = req_lib.get(modelInfoUrl(), headers=PROXY_HEADERS, timeout=2)
-            if resp.status_code == 200:
-                models = resp.json().get("data", [])
-                for m in models:
-                    if m.get("model_name") == modelName or m.get("id") == modelName:
-                        info = m.get("model_info", {})
-                        found = (
-                            info.get("max_input_tokens")
-                            or m.get("max_input_tokens")
-                            or info.get("max_tokens")
-                        )
-                        if found: limit = int(found)
-                        break
-        except Exception: pass
-
-        ## Fallback values
-        if limit == 8192:
-            lower_name = modelName.lower()
-            if "gemini" in lower_name:        limit = 1048576
-            elif "deepseek-r1" in lower_name: limit = 128000
-            elif "qwen" in lower_name:        limit = 32768
-
-        return limit
 
     ## Validate options, build context, stream a completion, and save successful results.
     def handleQuery(self, body: dict):
@@ -327,7 +298,7 @@ class Handler(BaseHTTPRequestHandler):
                 promptTokens = max(1, len(json.dumps(messages, ensure_ascii=False).encode("utf-8")) // 4,)
                 totalTokens = promptTokens + completionTokens
                 
-            contextLimit = self.getContextLimit(actualModel)
+            contextLimit = getContextLimit(actualModel)
             ## The done event ends generation and updates the browser usage bar.
             self.writeSse(
                 "done",

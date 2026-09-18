@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# Safe prompt shortening
+# Safe prompt shortening + token calculation
 #
 # Removes extra JSON whitespace without changing string or number text.
 # Repeated file blocks can point back to their first copy in the request.
@@ -10,6 +10,8 @@
 import hashlib
 import json
 import re
+import requests
+from proxyClient import PROXY_HEADERS, modelInfoUrl
 
 def optimizeFile(content, name=""):
     # -----------------------------------------------------------------------
@@ -80,3 +82,38 @@ def optimizeMessages(messages):
         optimized.append(copied)
         
     return optimized
+
+
+def getContextLimit(modelName: str) -> int | None:
+    # ----------------------------------------------------------------------------
+    # Reads input limits reported by the configured gateway.
+    # Matches gateway aliases, deployment IDs, and provider model names.
+    # Returns None when the gateway does not provide a valid limit.
+    # ----------------------------------------------------------------------------
+    try:
+        response = requests.get(modelInfoUrl(), headers=PROXY_HEADERS, timeout=2,)
+        response.raise_for_status()
+
+        ## Match the streamed provider name as well as gateway aliases and IDs.
+        for model in response.json().get("data", []):
+            info = model.get("model_info") or {}
+            params = model.get("litellm_params") or {}
+            names = (
+                model.get("model_name"),
+                model.get("id"),
+                info.get("id"),
+                params.get("model"),
+            )
+            if modelName not in names: continue
+
+            ## Missing metadata in one matching entry should not end the search.
+            for value in (info.get("max_input_tokens"), model.get("max_input_tokens"),):
+                if value is None or isinstance(value, bool): continue
+                try:
+                    limit = int(value)
+                    if limit > 0: return limit
+                except (TypeError, ValueError, OverflowError): continue
+
+    ## Unavailable metadata should not interrupt a completed response.
+    except (requests.RequestException, ValueError, TypeError, AttributeError): pass
+    return None
