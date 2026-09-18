@@ -1,0 +1,16 @@
+# ----------------------------------------------------------------------------
+# Optional Hugging Face inference dependencies
+#
+# Adds the Transformers backend for complete local Safetensors or PyTorch models.
+# GGUF inference continues to use the existing requirements.txt dependencies.
+# Install the appropriate PyTorch CPU/CUDA build for your hardware first.
+# ----------------------------------------------------------------------------
+
+## Tensor execution; the installed build determines CPU/CUDA support.
+torch>=2.2
+## Model/tokenizer loading and streaming; retain the supported Transformers 4 API.
+transformers>=4.45,<5
+## Low-memory loading and optional automatic device placement.
+accelerate>=0.34
+## Weight-file and tokenizer formats used by common local model exports.
+safetensors>=0.4

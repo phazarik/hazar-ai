@@ -18,8 +18,9 @@ This is a local chat setup, with a **terminal** interface, a **browser** interfa
 
  ![Browser chat](.image/ui.png) 
 
-- Automatic model selection, plus quick, detailed, and local options and VS Code integration.
-- Streaming replies in the terminal and browser, which are faster than typical AI apps.
+- Automatic model selection, quick and detailed cloud routes, a local-model dropdown, and VS Code integration.
+- Streaming cloud and Transformers replies in the terminal and browser. The current GGUF backend sends its reply after generation completes.
+- Automatic discovery of supported local models, with one model loaded at a time to conserve RAM and VRAM.
 - Shared conversation memory for the CLI and web interface.
 - Optional skills stored outside this repository, with full selected skill text included in requests.
 - Text-file attachments and optional file optimization.
@@ -37,7 +38,7 @@ This setup sends prompts and receives replies. It does not automatically run gen
 - **Keep everyday tasks simple.** Start with `auto`, or pick `fast`, `smart`, or an installed local model yourself.
 - **Bring your own context.** Add text files and a task-specific skill without setting up a coding agent.
 - **Keep useful output.** Copy a reply as Markdown, copy an individual block, or download larger generated text files. Reuse saved conversation context across the CLI and browser.
-- **Choose where inference runs.** Use configured cloud providers or GGUF models on your own device.
+- **Choose where inference runs.** Use configured cloud providers, GGUF models, or supported complete Transformers model folders on your own device.
 - **Make it your own.** The browser uses plain HTML, JavaScript, and CSS. Routing, memory, skills, and output capture live in separate Python files, so you can find and change a specific behavior.
 
 Use it when you want to ask questions, attach a few source files, get suggestions or complete text files, and decide which changes to apply yourself. The main reason to choose Hazar-AI is this combination of personal chat, shared CLI/browser context, text skills, and reusable output in a setup you can edit. You still manage model availability, provider keys, hardware, and the quality of generated answers.
@@ -49,7 +50,7 @@ These tools cover different parts of the workflow. OmniRoute focuses on the gate
 <table>
 <thead><tr><th>Tool</th><th>Advantages</th><th>Disadvantages / tradeoffs</th><th>Good fit</th></tr></thead>
 <tbody>
-<tr><td><strong>This setup</strong></td><td><p>Combines CLI and browser chat, shared conversation history, text attachments, full selected skill text, copy icons, and generated-text downloads. Its scripts also start local GGUF servers. The browser and Python helpers are easy to find and customize.</p></td><td><p>You maintain provider routes and the Python/Linux setup. Startup modes replace matching services, browser chats share history, and the UI has no separate user login. It does not execute generated code or include web search or document retrieval.</p></td><td><p>A personal chat workspace where you want cloud and local models, choose the context yourself, and review output before applying it.</p></td></tr>
+<tr><td><strong>This setup</strong></td><td><p>Combines CLI and browser chat, shared conversation history, text attachments, full selected skill text, copy icons, and generated-text downloads. Its scripts also start a shared local inference service for supported GGUF and Transformers models, loading one model at a time. The browser and Python helpers are easy to find and customize.</p></td><td><p>You maintain provider routes and the Python/Linux setup. Startup modes replace matching services, browser chats share history, and the UI has no separate user login. It does not execute generated code or include web search or document retrieval.</p></td><td><p>A personal chat workspace where you want cloud and local models, choose the context yourself, and review output before applying it.</p></td></tr>
 <tr><td><strong><a href="https://github.com/diegosouzapw/OmniRoute#readme">OmniRoute</a></strong></td><td><p>Documents a broad provider catalog, quota telemetry, automatic model scoring, configurable routing strategies, and coding-tool integrations.</p></td><td><p>Its extra gateway controls mean more settings to learn. It is a different workflow from Hazar-AI's shared CLI/browser history, selected text skills, and fenced-file downloads. Provider access and quotas still matter.</p></td><td><p>A gateway-focused setup where routing control, provider choice, and quota visibility matter most.</p></td></tr>
 <tr><td><strong><a href="https://github.com/open-webui/open-webui#readme">Open WebUI</a></strong></td><td><p>Offers a full browser platform for local and OpenAI-compatible models, with user permissions, document retrieval, web-search integrations, and tools.</p></td><td><p>Its broader platform gives you more features to configure. For a personal workflow built around shared terminal/browser history and a few editable scripts, Hazar-AI may be enough.</p></td><td><p>A richer browser workspace, especially when you need separate users, searchable documents, or connected tools.</p></td></tr>
 <tr><td><strong><a href="https://aider.chat/docs/">Aider</a></strong></td><td><p>Provides terminal-based AI pair programming that edits files in a local repository, with Git integration and a repository map for context.</p></td><td><p>It focuses on making code changes in a repository. You need to review those edits. Hazar-AI instead returns chat and generated text for you to copy, download, and apply yourself.</p></td><td><p>Hands-on coding work where you want the assistant to change project files.</p></td></tr>
@@ -63,56 +64,41 @@ Upstream details: [OmniRoute README](https://github.com/diegosouzapw/OmniRoute#r
 
 ## How it works
 
-The repository is structured as follows.
+The repository is structured as follows. Important files are shown.
+
 ```text
-hazar-ai/
-├── README.md                    # Start here: setup, usage, and troubleshooting
-├── requirements.txt             # Direct Python dependencies
-├── setup.py                     # Prepare keys, folders, Continue, and optional service
-├── start.sh                     # Start the selected services; default is all
-├── kill.sh                      # Stop matching running services
-├── query.py                     # CLI chat, attachments, skills, and memory commands
-├── core/                        # Gateway configuration and integration
-│   ├── config.yaml              # Persistent cloud deployments and routing settings
-│   ├── routerHook.py            # Choose fast/smart for automatic requests
-│   ├── generateLocalConfig.py   # Generate cloud+local and local-only route files
-│   ├── litellm.env.example      # Public template for provider and gateway keys
-│   ├── litellm.env              # Private keys; created locally, not committed
-│   ├── apiKeys.sh               # Load provider environment settings
-│   ├── continueConfig.yaml      # Reference Continue configuration
-│   └── litellm.service          # Gateway service template
-├── lib/                         # Shared chat helpers
-│   ├── proxyClient.py           # Authenticated gateway streaming and bounded retries
-│   ├── memoryManager.py         # Save history, summaries, and file metadata
-│   ├── skillLoader.py           # Discover, inspect, and expand local skills
-│   ├── tokenOptimizer.py        # Compact valid JSON and deduplicate file context
-│   ├── outputManager.py         # Capture larger fenced text files safely
-│   ├── systemPrompt.py          # Shared personality and response rules
-│   └── __init__.py              # Python package marker
-├── ui/                          # Browser chat interface
-│   ├── server.py                # HTTP backend, chat streaming, and downloads
-│   ├── index.html               # Page structure, controls, and CDN libraries
-│   ├── script.js                # Browser interactions and streamed replies
-│   └── style.css                # Theme, fonts, and resizable layout
-├── models/                      # Your GGUF files; created during setup
-├── findModels.py                # Discover provider model names
-└── cleanup.py                   # Remove temporary files; --all also removes chats/output
+├── core/
+│   ├── config.yaml                    # Edit persistent cloud model routes here
+│   ├── ...
+│   └──  litellm.env                   # Private API keys are kept here
+├── lib/                               # Shared helpers for models, memory, skills, and output
+├── models/                            # Place complete GGUF files or Transformers folders here
+├── ui/                                # Browser interface, styling, and HTTP backend
+├── findModels.py                      # List models offered by configured cloud providers
+├── query.py                           # CLI chat
+├── requirements.txt                   # Main application and GGUF backend dependencies
+├── requirements-local-hf.txt          # Additional dependencies for Transformers models
+├── setup.py                           # Prepare folders, credentials, and Continue integration
+├── start.sh                           # Start the selected services; supports offline mode
+└── kill.sh                            # Stop application services and local model workers
 ```
+
+The files kept inside `models/` are local downloads, not required repository files. Keep private credentials and large model weights out of Git. Startup rebuilds the generated YAML files; edit `core/config.yaml` for persistent cloud-route changes.
 
 ![Repository structure](.image/structure.png)
 
 1. **Choose an interface.** The CLI runs through `query.py`. The browser talks to `ui/server.py` on port **5000**. Both use the same chat helpers and conversation store.
 2. **Build the context.** The app combines your prompt with its personality rules, saved history when memory is enabled, a selected skill, and any UTF-8 text attachments. Optional optimization compacts valid JSON and avoids repeating identical file blocks; it keeps ordinary source formatting and comments intact.
-3. **Send the request.** `lib/proxyClient.py` sends an authenticated request to the LiteLLM gateway on port **4000**. It can retry temporary failures and switch between configured tier aliases before output starts. Once content, reasoning, or tool output starts, it does not automatically replay the request.
-4. **Pick a model route.** In the normal configuration, `auto` uses local keyword and length checks to choose `fast` or `smart`. An optional model-based classifier makes a separate provider request. Exact registered model names bypass classification and client tier switching; tier aliases can still use the configured fallback routes. Cloud deployments come from `core/config.yaml`; local GGUF models run through llama.cpp on ports **8000**, **8001**, and so on. Startup generates matching local aliases.
-5. **Bring the answer back.** The selected cloud or local LLM returns its response to LiteLLM. The gateway streams it back through the client to the CLI or web backend, which displays it in the terminal or browser. Solid arrows show outgoing requests; dashed arrows show replies returning to the user.
-6. **Save completed results.** With memory enabled, a successful completed chat is saved to the shared conversation store. Separately, `lib/outputManager.py` captures eligible complete fenced text blocks of at least **1,000 characters** into `output/<chat-ID>/<request-ID>/`. The browser offers download links; the CLI prints the saved folder. Failed, stopped, or incomplete replies do not create new captured files.
+3. **Send the request.** `lib/proxyClient.py` sends cloud requests to the authenticated LiteLLM gateway on port **4000**. It can retry temporary failures and switch between configured tier aliases before output starts. Local requests go directly to the authenticated local inference service on port **8000**, without switching to cloud models. Once output starts, the client does not automatically replay the request.
+4. **Pick a model route.** In the normal configuration, `auto` uses local keyword and length checks to choose `fast` or `smart`. An optional model-based classifier makes a separate provider request. Exact registered model names bypass classification and client tier switching; tier aliases can still use the configured fallback routes. Cloud deployments come from `core/config.yaml`. Supported local models share one inference service on port **8000**; it loads the selected model only when needed. Startup generates corresponding gateway aliases for integrations such as Continue.
+5. **Bring the answer back.** Cloud replies return through LiteLLM; local CLI and browser replies return directly through the shared local service. Cloud and Transformers replies can stream incrementally. The current GGUF worker generates the complete reply before sending its text.
+6. **Save completed results.** With memory enabled, a successful completed chat is saved to the shared conversation store. Separately, `lib/outputManager.py` captures eligible complete fenced text blocks of at least **1,000 characters** into `output/<chat-ID>/<request-ID>/`. The browser offers download links; the CLI prints the saved folder. Failed or incomplete replies do not create new captured files. The browser's Stop action disconnects its stream, but backend generation can continue and may save a completed result.
 
 **Continue takes a direct path.** The VS Code extension sends its own context to LiteLLM and receives replies directly. It shares the gateway routes and generated personality settings but manages its own context and tools; it does not use Hazar-AI's memory, skill selector, or file capture.
 
-**Offline mode keeps inference local.** `bash start.sh offline` starts the web backend, gateway, and GGUF servers with local-only routes. Choose `local` or `local:<model-name>`; `auto`, `fast`, and `smart` are absent. The browser still uses CDN assets, so local inference and a fully offline web page are separate concerns.
+**Offline mode keeps inference local.** `bash start.sh offline` starts the shared local inference service, a local-only gateway, and the browser backend. It requires at least one supported local model. Choose `local` or an exact `local:<relative-path>` identifier; `auto`, `fast`, and `smart` are absent. The browser still uses CDN assets, so local inference and a fully offline web page are separate concerns.
 
-Ports in the image are the default local service ports. `8000+` means one consecutive port per GGUF model, not a separate gateway. The memory shown here is saved conversation context, not a knowledge graph.
+The image predates the shared local inference service. Current default ports are **4000** for LiteLLM, **5000** for the browser backend, and **8000** for all local models. Local models no longer receive separate consecutive ports. The memory shown here is saved conversation context, not a knowledge graph.
 
 ## First-time setup
 
@@ -133,7 +119,15 @@ conda create -n llm python=3.11 -y
 conda activate llm
 python3 -m pip install -r requirements.txt
 ```
-Use one environment, and activate it again in every terminal that runs the Python tools. `requirements.txt` includes LiteLLM, CLI libraries, and the optional llama.cpp server.
+Use one environment, and activate it again in every terminal that runs the Python tools. `requirements.txt` installs the main application dependencies and the llama.cpp backend used for GGUF models.
+
+For supported Hugging Face Transformers model folders, also install:
+
+```bash
+python3 -m pip install -r requirements-local-hf.txt
+```
+
+The optional requirements add PyTorch, Transformers, Accelerate, and Safetensors. Install them in the same environment as the application. Both local backends use CPU inference by default. GPU acceleration requires a suitable PyTorch installation or `llama.cpp` build, plus the corresponding local-backend settings described below.
 
 If `llama-cpp-python` needs a source build, install compiler tools first. On Ubuntu or Debian:
 ```bash
@@ -168,6 +162,14 @@ python3 findModels.py --search llama
 ```
 The script lists models from providers with configured keys. Model names and availability change, so review `core/config.yaml` before starting cloud requests. Remove deployments for unused providers or update their keys and model names. A listed model is not necessarily free or available to every account.
 
+`findModels.py` lists cloud-provider models; it does not inspect local downloads. To list supported models discovered inside `models/`, run:
+
+```bash
+python3 query.py --list-models
+```
+
+This scans model metadata without loading model weights. Download instructions and supported formats are covered in [Local models and offline use](#local-models-and-offline-use).
+
 Keep the client aliases `auto`, `fast`, `smart`, and `local`. These are the names used by the CLI and GUI; provider model identifiers belong inside their deployments.
 
 ### 5. Run setup
@@ -201,21 +203,20 @@ bash kill.sh
 
 ```bash
 bash start.sh
-bash start.sh all      # Gateway, browser backend, and available GGUF servers
+bash start.sh all      # Gateway + browser backend + shared local inference service
 bash start.sh fresh    # Clear shared memory, then start the complete setup
-bash start.sh offline  # GGUF servers + local-only gateway + browser; no cloud routes
-bash start.sh proxy    # LiteLLM API only; no browser backend or GGUF servers
-bash start.sh local    # GGUF servers and generated route files only; no gateway/UI
-bash start.sh ui       # Browser backend only; needs an independently running gateway
+bash start.sh offline  # Local service + local-only gateway + browser; requires a model
+bash start.sh proxy    # LiteLLM gateway only; no browser or local inference service
+bash start.sh local    # Local inference service + generated routes; no gateway/UI
+bash start.sh ui       # Browser backend only; needs an independently running inference service
 ```
 **Every startup mode first stops matching existing services.** Running `start.sh proxy` followed by `start.sh ui` does not combine them: the second command stops the first service. Use `all` for the complete setup. Shutdown patterns can also match another Hazar-AI installation in the same Linux environment.
 
-| Service | Port |
+| Service | Default address |
 | --- | --- |
-| LiteLLM gateway | `4000` |
-| Web interface | `5000` |
-| First local model | `8000` |
-| Additional local models | `8001`, `8002`, and so on |
+| LiteLLM gateway | `http://localhost:4000` |
+| Browser interface | `http://localhost:5000` |
+| Shared local inference service | `http://127.0.0.1:8000` |
 
 The web backend binds on all interfaces and has no separate user login. Keep it in a trusted local environment; it is not a public multi-user service.
 
@@ -273,6 +274,8 @@ Hazar-AI reads skill text; it does not install or execute upstream hooks, script
 
 Open **http://localhost:5000** after starting the full setup.
 
+The toolbar has two rows. Model controls sit on the left of the first row, with the skill selector on the right. The second row places request and memory controls on the left, with Help and Status on the right. Selecting Local reveals a wider model dropdown styled like the skill selector, alongside a compact refresh icon.
+
 <table>
 <thead>
 <tr><th>Control</th><th>What happens</th></tr>
@@ -281,10 +284,11 @@ Open **http://localhost:5000** after starting the full setup.
 <tr><td nowrap>Automatic</td><td><p>The app chooses a quick or detailed route for the request.</p></td></tr>
 <tr><td nowrap>Quick</td><td><p>Requests the <code>fast</code> route for everyday questions.</p></td></tr>
 <tr><td nowrap>Detailed</td><td><p>Requests the <code>smart</code> route for harder tasks.</p></td></tr>
-<tr><td nowrap>On this device</td><td><p>Requests the default installed local model. Its server must be running.</p></td></tr>
+<tr><td nowrap>Local</td><td><p>Shows a dropdown of supported models discovered inside <code>models/</code>. Choose the model for the next request. The shared local inference service must be running.</p></td></tr>
+<tr><td nowrap>Refresh models icon</td><td><p>Rescans the local model directory and updates the dropdown without loading model weights.</p></td></tr>
 <tr><td nowrap>Skill</td><td><p>Adds the selected skill's instructions to the next request. <strong>None</strong> adds no skill.</p></td></tr>
 <tr><td nowrap>View skill</td><td><p>Opens the selected skill's full expanded text without sending a chat message.</p></td></tr>
-<tr><td nowrap>Max Tokens</td><td><p>Sets the maximum reply length. Unchecking it omits the app's explicit limit; the gateway and model still have their own limits.</p></td></tr>
+<tr><td nowrap>Max Tokens</td><td><p>Sets the maximum reply length. Unchecking it omits the client's explicit limit. Cloud services retain their own defaults; the local backend applies a bounded default that must fit the model's remaining context.</p></td></tr>
 <tr><td nowrap>Help</td><td><p>Opens the control guide.</p></td></tr>
 <tr><td nowrap>Status</td><td><p>Prints saved-memory information in the log panel.</p></td></tr>
 <tr><td nowrap>Optimize</td><td><p>Toggles file-context optimization for the next request.</p></td></tr>
@@ -293,7 +297,7 @@ Open **http://localhost:5000** after starting the full setup.
 <tr><td nowrap>Clear Memory</td><td><p>Asks for confirmation, deletes shared conversation memory, and clears the displayed chat.</p></td></tr>
 <tr><td nowrap>Attach file</td><td><p>Opens the file picker. Files can also be dropped onto the page and removed before sending.</p></td></tr>
 <tr><td nowrap>Send</td><td><p>Sends the prompt and queued attachments.</p></td></tr>
-<tr><td nowrap>Stop</td><td><p>Cancels the active reply, restores the prompt and attachments, and leaves partial output visible.</p></td></tr>
+<tr><td nowrap>Stop</td><td><p>Disconnects the browser's active reply stream, restores the prompt and attachments, and leaves partial output visible. Backend generation may continue and save a completed result.</p></td></tr>
 <tr><td nowrap>Copy icon</td><td><p>The icon beside Morpheus's label copies the reply as Markdown. Each code or text block has its own top-right icon that copies only that block's content, without the fence markers.</p></td></tr>
 </tbody>
 </table>
@@ -302,14 +306,14 @@ Press **Enter** or **Shift+Enter** for a new line. Press **Ctrl+Enter** to send.
 
 Copy icons work for streamed replies and restored history, including small blocks that do not qualify for downloads. A checkmark shows a successful copy.
 
-The usage display estimates how much model conversation space the request used. It is not an account quota, a remaining balance, or a guarantee that all earlier messages are available.
+The usage display uses backend token counts when available and otherwise reports an estimate. For local models, it measures prompt plus reply tokens against the active context window. Local inference has no provider token quota, but context length and available RAM or VRAM remain finite. For cloud models, the display uses the reported input limit; it is not an account quota or remaining balance.
 
 ### Generated-file downloads
 
 Ordinary replies stay in the chat. The app does not automatically save the whole reply as `response.md` or offer a full-response download. Complete fenced code or text blocks become downloadable files only when each block contains at least **1,000 characters**, excluding surrounding whitespace.
 > Change `MIN_FILE_CHARACTERS = 1000` in `lib/outputManager.py` to adjust the download-link cutoff
 
-Copy icons are separate from file capture and have no minimum block size. The current capture handles text blocks, not binary files or links to files on a remote model service. Failed, stopped, or incomplete replies do not create new captured files.
+Copy icons are separate from file capture and have no minimum block size. The current capture handles text blocks, not binary files or links to files on a remote model service. Failed or incomplete replies do not create new captured files. Disconnecting the browser stream does not guarantee that backend generation or file capture stops.
 
 Named blocks keep their safe relative filenames; unnamed blocks get names such as `snippet-1.py`. For example, ask:
 ```text
@@ -335,6 +339,16 @@ python3 query.py --model smart --query "Review this design for edge cases."
 `auto` is the default. Its first choice uses local keyword and length checks, without an extra provider classification request. Configured alternatives may be tried if a route fails before output begins.
 
 An exact model alias registered in the gateway can also be used with `--model`. Such a name bypasses automatic classification and client tier switching.
+
+### List or choose a local model
+
+```bash
+python3 query.py --list-models
+python3 query.py --model local --query "Explain a Python list comprehension." --no-memory
+python3 query.py --model "local:qwen2.5-1.5b-instruct-q4_k_m.gguf" --query "Hello." --no-memory
+```
+
+`local` selects the first discovered model in the sorted list. To select a specific model, copy its exact identifier from `--list-models`. Identifiers preserve the path relative to `models/`, including the `.gguf` extension. Transformers models use their directory path instead.
 
 ### Attach files and optimize their context
 
@@ -390,27 +404,116 @@ The status command shows saved chat count, summary length, and cached files. Cle
 
 ## Local models and offline use
 
-Place `.gguf` files directly inside `models/`, then run:
+Hazar-AI scans `models/` recursively without loading model weights. Supported downloads appear in the browser's Local dropdown and in `python3 query.py --list-models`.
+
+### Supported formats
+
+- **GGUF:** complete `.gguf` files, using llama.cpp. Split GGUF models require every part of the split.
+- **Transformers:** complete causal-language-model directories containing `config.json`, tokenizer files, and supported Safetensors or `pytorch_model*.bin` weights. Sharded weights require their index file and every referenced shard.
+
+A standalone `.safetensors` or `.bin` file is not treated as a complete Transformers model. The current loader does not support encoder-decoder models, adapter-only downloads, or Hugging Face checkpoints with a `quantization_config`, including common FP8, AWQ, GPTQ, and bitsandbytes checkpoints. Architectures must be supported by the installed Transformers version without custom remote code.
+
+### Downloading models from Hugging Face
+
+Hugging Face provides a Hub where publishers share model repositories containing weights, configuration, tokenizer files, and model documentation. Browse its [model catalog](https://huggingface.co/models) and read the model card before downloading. Check the license, intended use, format, and hardware requirements. See the [Hub model documentation](https://huggingface.co/docs/hub/models).
+
+For GGUF, open the repository's **Files and versions** tab and download one suitable complete GGUF variant into `models/`. Different quantization variants are alternative downloads; you normally need only the variant you intend to run. For a split variant, download every part.
+
+For Transformers, download the complete model repository into its own directory under `models/`. Preserve the original filenames and directory layout. Downloading just one weight shard is insufficient.
+
+For example, after installing `requirements-local-hf.txt`, download the [DeepSeek-R1-Distill-Qwen-1.5B repository](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B/tree/main) from the project directory:
+
+```bash
+python3 - <<'PY'
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+    local_dir="models/deepseek-r1-distill-qwen-1.5b",
+)
+PY
+```
+
+`snapshot_download` downloads a repository while preserving its structure in the destination directory. Some repositories require authentication and acceptance of access conditions. See the [official download guide](https://huggingface.co/docs/huggingface_hub/guides/download).
+
+> **Warning — download size and hardware requirements:** Model downloads can range from hundreds of megabytes to hundreds of gigabytes. Check individual file sizes and the total download size under **Files and versions** before downloading. Ensure you have enough disk space, bandwidth, and RAM or VRAM to run the model; download size alone does not indicate its runtime memory requirements. Start with a small model or a suitable quantized GGUF variant. For sharded models, every required shard must be downloaded; a single shard cannot run independently.
+
+### Select and run a model
+
+A typical layout is:
+
+```text
+models/
+├── qwen2.5-1.5b-instruct-q4_k_m.gguf
+└── deepseek-r1-distill-qwen-1.5b/
+    ├── config.json
+    ├── model.safetensors
+    ├── tokenizer.json
+    └── tokenizer_config.json
+```
+
+Start the complete setup and inspect the available identifiers:
+
 ```bash
 bash start.sh all
+python3 query.py --list-models
 ```
-Each file gets a llama.cpp server on a consecutive port, starting at `8000`. The first model also receives the plain `local` alias. Specific models use their filenames without `.gguf`:
+
+Choose **Local** in the browser and select a model from the dropdown. Use the refresh icon after adding or removing downloads.
+
+For the CLI:
+
 ```bash
-python3 query.py --model local --query "Explain a Python list comprehension."
-python3 query.py --model "local:my-model" --query "Review this function." --file app.py
+python3 query.py \
+    --model "local:qwen2.5-1.5b-instruct-q4_k_m.gguf" \
+    --query "Hello." \
+    --no-memory
+
+python3 query.py \
+    --model "local:deepseek-r1-distill-qwen-1.5b" \
+    --query "Explain a Python generator." \
+    --no-memory
 ```
+
+The plain `local` alias selects the first discovered model in sorted order. Nested downloads retain their relative directory path in the identifier.
+
+### Memory usage and context limits
+
+All local models share one service on port **8000**. The selected model loads on its first request and stays available for reuse. Switching models unloads the previous worker before loading the next one. By default, an idle model unloads after five minutes.
+
+GGUF uses memory mapping; the Transformers loader uses low-memory loading. These settings reduce avoidable overhead, but model weights and inference still require sufficient RAM or VRAM. The local service processes one inference request at a time.
+
+Optional settings can be placed in `core/litellm.env`; restart after changing them:
+
+```bash
+HAZAR_LOCAL_CONTEXT="4096"      # Requested context; capped by model metadata
+HAZAR_LOCAL_IDLE_SECONDS="300"  # Idle unload delay; 0 keeps the model loaded
+HAZAR_LOCAL_TIMEOUT="600"       # Maximum worker silence before timeout
+HAZAR_GPU_LAYERS="0"            # GGUF GPU offload; requires a compatible build
+HAZAR_LOCAL_DEVICE="cpu"        # Transformers device; GPU needs suitable PyTorch
+```
+
+Local models have no provider token quota, but their context windows are finite. Prompt, history, skills, attachments, and generated output must fit the active context. Oversized local requests are rejected rather than silently discarding history.
+
+Local chats skip automatic cloud-based memory summarization. Long histories can therefore exceed the model's context. Use `--no-memory`, turn Memory off in the browser, or clear memory when starting a separate task.
+
+### Offline operation
+
 For local-only inference:
+
 ```bash
 bash start.sh offline
 python3 query.py --model local --query "Hello." --no-memory
 ```
-Select **On this device** in the browser. Offline configuration contains no cloud routes or cloud routing callback. It needs at least one GGUF file; `auto`, `fast`, and `smart` are not registered in that generated configuration.
 
-Memory summarization currently requests the `fast` alias. In offline mode that request can fail, leaving full history intact. Long offline chats may therefore outgrow the local model's context; use `--no-memory`, turn memory off, or clear it when starting a separate task.
+Offline startup requires at least one supported model. Its generated gateway configuration contains only local routes; `auto`, `fast`, and `smart` are not registered. Cloud-provider keys can remain empty.
 
-Local inference does not require provider access, but the web page still loads rendering libraries and icons from external sites. Without cached or locally hosted assets, a browser with no internet access may fail to render replies because the page depends on those libraries. For fully disconnected use with the current files, use the CLI.
+The browser still loads libraries, fonts, and icons from external sites. Fully disconnected browser use requires those assets to be cached or hosted locally. The CLI can operate offline once dependencies and model files are installed.
 
-Generated gateway configurations are rebuilt by startup. Edit `core/config.yaml` for lasting cloud changes rather than editing generated files.
+The browser and CLI rescan local downloads without restarting inference services. Gateway aliases used by Continue are generated during startup, so restart the appropriate startup mode after adding or removing models.
+
+Generated configurations are rebuilt automatically. Edit `core/config.yaml` for persistent cloud changes rather than editing generated YAML files.
+
 
 ## VS Code and Continue
 
@@ -426,7 +529,7 @@ Continue connects directly to the gateway. It shares the configured routing and 
 
 Personality rules apply to Continue's Chat, Agent, and Edit requests. Rules do not apply to autocomplete or Apply, and Agent mode also depends on the selected model and gateway supporting tools. See [Continue's rule guide](https://docs.continue.dev/customize/deep-dives/rules).
 
-For offline Continue use, change the generated model setting from `auto` to `local` or a registered `local:<name>` alias. Rerunning setup restores the generated `auto` setting.
+For offline Continue use, start `bash start.sh offline` and change the generated model setting from `auto` to `local` or an exact registered `local:<relative-path>` identifier. GGUF identifiers include `.gguf`. Restart offline mode after adding or removing models so the gateway aliases are regenerated. Rerunning setup restores the generated `auto` setting.
 
 ## Customize the setup
 
@@ -461,7 +564,9 @@ The CLI and web interface share one memory store for the installation. Separate 
 
 `memory/graph.json` stores messages, `memory/summary.txt` stores older context, and `memory/files.json` stores attachment metadata. This is conversation storage, not a knowledge graph.
 
-By default, after more than 20 chat pairs, the app attempts to summarize older messages and keep the latest 10 pairs intact. Summarization is a separate model request and can use provider quota. If it fails or returns unusable content, full history stays in place. Summaries can lose detail.
+For cloud chats, after more than 20 chat pairs, the app attempts to summarize older messages using the `fast` route and keep the latest 10 pairs intact. Summarization is a separate request and can use provider quota. If it fails or returns unusable content, full history stays in place. Summaries can lose detail.
+
+Local chats disable automatic summarization to avoid a cloud request. Their retained history can outgrow the local context window. History is still shared: selecting a cloud model later includes enabled saved context in that cloud request.
 
 ### Automatic selection
 
@@ -479,7 +584,7 @@ The clients can use another compatible chat-completions endpoint. Set these serv
 HAZAR_PROXY_URL="http://127.0.0.1:PORT/v1/chat/completions"
 HAZAR_PROXY_KEY="replace-with-gateway-key"
 ```
-Replace `PORT`, the path, and the key with the gateway's actual settings. Configure compatible model aliases in that gateway too. Restart the web backend; new CLI processes read the new values. Rerun setup if Continue should use the same endpoint. These settings redirect client requests; they do not install or configure OmniRoute. `start.sh all` still starts the bundled LiteLLM service. Provider credentials stay on the server, outside browser JavaScript.
+Replace `PORT`, the path, and the key with the gateway's actual settings. Configure compatible model aliases in that gateway too. Restart the web backend; new CLI processes read the new values. Rerun setup if Continue should use the same endpoint. These settings redirect cloud and tier requests; local model requests still use the shared local inference endpoint. They do not install or configure OmniRoute. `start.sh all` still starts the bundled LiteLLM service. Provider credentials stay on the server, outside browser JavaScript.
 
 ### Optional systemd service
 
@@ -489,7 +594,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now litellm.service
 systemctl --user status litellm.service
 ```
-The generated service starts only the gateway with `core/config.yaml`. It does not start the UI or GGUF servers. Avoid running it alongside startup-script management of the same gateway. Stop and disable it before returning to the regular startup flow:
+The generated service starts only the gateway with `core/config.yaml`. It does not start the UI or shared local inference service. Avoid running it alongside startup-script management of the same gateway. Stop and disable it before returning to the regular startup flow:
 ```bash
 systemctl --user disable --now litellm.service
 ```
@@ -505,7 +610,7 @@ python3 cleanup.py --all
 
 ## When something goes wrong
 
-### The browser says localhost refused to connect
+### The browser says "localhost refused to connect"
 
 First check the UI log:
 ```bash
@@ -516,11 +621,19 @@ A “started” line only means the process was launched; it can still exit imme
 bash kill.sh
 python3 ui/server.py
 ```
-This tests UI startup; chat replies still need a running gateway. Keep the same Python environment active so the backend and gateway use the installed dependencies. Close the foreground server, then use `bash start.sh all` once the problem is fixed. For a remote container or Codespace, open its forwarded port `5000` rather than the host's unrelated localhost address.
+This tests UI startup; cloud replies need a running gateway, while local replies need the shared local inference service. Keep the same Python environment active so the backend and gateway use the installed dependencies. Close the foreground server, then use `bash start.sh all` once the problem is fixed. For a remote container or Codespace, open its forwarded port `5000` rather than the host's unrelated localhost address.
 
 ### A model returns 404, 401, or repeated errors
 
 Check `core/litellm.log`, verify the provider key, and run `python3 findModels.py`. Update model identifiers and remove unavailable deployments from `core/config.yaml`, then restart. Retries can help temporary failures; they cannot fix invalid credentials or permanently unavailable models. If a reply has already started, the app does not silently replay it on another model. Partial output stays visible, and the prompt is restored for another attempt.
+
+### A local model is missing or fails to load
+
+Run `python3 query.py --list-models`. For GGUF, check that the download is complete and every split part is present. For Transformers, check the configuration, tokenizer, weights, and any shard index. A lone Safetensors shard is not a complete model.
+
+Install `requirements-local-hf.txt` when using Transformers models, then check `core/local.log` for loading errors. Unsupported architectures, quantization formats, or insufficient RAM/VRAM can prevent loading.
+
+For context-limit errors, reduce attachments, skill text, history, or the requested reply length. A local HTTP 409 response means another inference request is active; wait for it to finish.
 
 ### No skill appears
 
