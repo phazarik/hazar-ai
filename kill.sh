@@ -18,7 +18,16 @@ kill_service() {
   if [ -n "$pids" ]; then
     echo ">> Stopping $name (PID $pids)..."
     kill $pids 2>/dev/null ## Try the normal termination signal before forcing a stop.
-    sleep 1
+
+    ## Allow the local service to release its worker before forcing shutdown.
+    for attempt in {1..24}; do
+      local still_running=0
+      for pid in $pids; do
+        if kill -0 "$pid" 2>/dev/null; then still_running=1; fi
+      done
+      if [ "$still_running" -eq 0 ]; then break; fi
+      sleep 0.5
+    done
 
     ## Check again after giving each process a moment to exit.
     for pid in $pids; do
@@ -34,6 +43,8 @@ kill_service() {
 
 kill_service "litellm --config" "LiteLLM Proxy"
 kill_service "python3 ui/server.py" "Web UI"
-kill_service "llama_cpp.server" "Local Model Server"
+kill_service "python3 core/localServer.py" "Lazy Local Model Service"
+kill_service "core/localWorker.py" "Local Model Worker"
+kill_service "llama_cpp.server" "Legacy Local Model Server"
 
 echo ">> Cleanup complete."

@@ -2,7 +2,7 @@
 # ----------------------------------------------------------------------------
 # Local model gateway configs
 #
-# Builds gateway entries for the GGUF servers started by start.sh.
+# Builds gateway entries for the lazy-loading local server started by start.sh.
 # Normal startup keeps cloud routes and adds every local model alias.
 # Offline startup gets a separate config containing only local routes.
 # YAML serialization handles spaces and punctuation in model filenames.
@@ -14,33 +14,39 @@ import sys
 import yaml
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-def generateConfigs(modelFiles, baseDirectory=BASE_DIR):
+## Share model discovery with the CLI, browser backend, and inference service.
+sys.path.insert(0, os.path.join(BASE_DIR, "lib"))
+from localModels import scanModels
+
+def generateConfigs(modelFiles=None, baseDirectory=BASE_DIR):
     # -----------------------------------------------------------------------
-    # Register one server per model and preserve cloud routes in normal mode.
-    # start.sh passes filenames in its exact startup order. The first server
-    # also receives the plain local alias. YAML serialization quotes unusual
-    # filenames correctly. The offline config contains only local routes and
-    # excludes cloud callbacks and cloud fallback chains.
+    # Register discovered models on one shared inference service.
+    # Relative filenames and folder paths provide stable local aliases.
+    # The first discovered model also receives the plain local alias.
+    # Normal configuration preserves cloud routes; offline contains local only.
     # -----------------------------------------------------------------------
-    
-    ## Use the exact startup order; entry zero maps to port 8000, entry one to 8001, and so on.
+
+    ## Every route shares port 8000; only the requested model is loaded.
     localEntries = []
-    for index, filename in enumerate(modelFiles):
-        modelName = os.path.splitext(os.path.basename(filename))[0]
+    modelDirectory = os.path.join(baseDirectory, "models")
+
+    for index, model in enumerate(scanModels(modelDirectory)):
         entry = {
-            "model_name": f"local:{modelName}",
+            "model_name": model["id"],
             "litellm_params": {
-                "model": "openai/local",
-                "api_base": f"http://127.0.0.1:{8000 + index}/v1",
-                "api_key": "sk-local",
+                "model": "openai/" + model["id"],
+                "api_base": "http://127.0.0.1:8000/v1",
+                "api_key": "os.environ/LITELLM_MASTER_KEY",
             },
         }
         localEntries.append(entry)
-        ## The first model also gets the plain local alias for existing CLI/UI requests.
+
+        ## Preserve the existing default local route.
         if index == 0:
             default = copy.deepcopy(entry)
             default["model_name"] = "local"
             localEntries.append(default)
+        
     coreDirectory = os.path.join(baseDirectory, "core")
     with open(os.path.join(coreDirectory, "config.yaml"), encoding="utf-8") as configFile:
         runtime = yaml.safe_load(configFile)

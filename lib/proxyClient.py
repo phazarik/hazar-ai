@@ -7,7 +7,7 @@
 # Partial replies are never replayed automatically.
 # ----------------------------------------------------------------------------
 
-import os
+import os, sys
 import json
 import time
 import random
@@ -16,6 +16,11 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
 import shlex
 import requests
+
+## Import shared helpers by script location so startup works from any shell folder.
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(BASE_DIR, "lib"))
+from localModels import isLocal, LOCAL_URL
 
 ## Read gateway values from the local environment file, then apply environment overrides.
 def gatewaySettings():
@@ -85,6 +90,10 @@ def streamCompletion(payload, log=lambda message: None):
 
     ## Named provider models stay on one route; only tier aliases get tier fallbacks.
     model = payload.get("model", "auto")
+    ## Local requests use the shared inference service without provider routing.
+    local = isLocal(model)
+    endpoint = LOCAL_URL if local else PROXY_URL
+    if local: log("Local inference: no provider quota; context and output limits still apply.")
     aliases = {
         "auto": ["auto", "fast", "smart"],
         "fast": ["fast", "smart"],
@@ -92,7 +101,8 @@ def streamCompletion(payload, log=lambda message: None):
     }.get(model, [model])
 
     ## Try the last route once more after the available fallback routes are exhausted.
-    attempts = aliases + [aliases[-1]]
+    ## Local failures are returned directly; cloud requests retain their retry chain.
+    attempts = aliases if local else aliases + [aliases[-1]]
     wait = 0
     for index, alias in enumerate(attempts):
         if wait:
@@ -101,7 +111,7 @@ def streamCompletion(payload, log=lambda message: None):
         emitted = False
         try:
             ## The timeouts cover connection setup and waiting for streamed response bytes.
-            with requests.post(PROXY_URL, headers=PROXY_HEADERS,
+            with requests.post(endpoint, headers=PROXY_HEADERS,
                                json=dict(payload, model=alias), stream=True, timeout=(10, 180),
                                ) as response:
                 if response.status_code != 200:
@@ -156,7 +166,8 @@ def streamCompletion(payload, log=lambda message: None):
                             or "429" in message
                             or "rate limit" in message.lower()):
                             raise requests.exceptions.ConnectionError("Retryable gateway stream error")
-                        raise RuntimeError("Gateway stream error; check gateway logs")
+                        ## Show actionable local loader/context errors to the caller.
+                        raise RuntimeError(message if local else "Gateway stream error; check gateway logs")
 
                     choices = data.get("choices") or []
                     if choices:

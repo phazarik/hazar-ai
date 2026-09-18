@@ -23,14 +23,10 @@ import memoryManager as mem
 import skillLoader as skills
 from proxyClient import streamCompletion, PROXY_HEADERS, modelInfoUrl
 from tokenOptimizer import optimizeMessages, getContextLimit
-from outputManager import (
-    ARTIFACT_PROMPT,
-    captureOutputs,
-    validChatId,
-    OUTPUT_DIR,
-    isWithinDirectory,
-)
+from outputManager import (ARTIFACT_PROMPT, captureOutputs, validChatId,
+                           OUTPUT_DIR, isWithinDirectory)
 from systemPrompt import SYSTEM_PROMPT
+from localModels import publicModels, isLocal
 
 UI_DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = 5000
@@ -110,6 +106,7 @@ class Handler(BaseHTTPRequestHandler):
             content = skills.loadSkill(name, fullText=True)
             if content is None: self.sendJson({"error": "Skill not found"}, 404)
             else:               self.sendJson({"name": name, "content": content})
+        elif path == "/api/models": self.sendJson({"models": publicModels()})
         elif path == "/api/status": self.sendJson(mem.memoryStatus())
         elif path == "/.image/logo.png": self.serveFile(os.path.join(BASE_DIR, ".image", "logo.png"), "image/png")
         elif path == "/api/history":
@@ -255,6 +252,8 @@ class Handler(BaseHTTPRequestHandler):
         if maxTokens is not None: payload["max_tokens"] = int(maxTokens)
         reply = ""
         actualModel = "unknown"
+        runtimeContext = None
+        estimatedUsage = False
         promptTokens = 0
         completionTokens = 0
         totalTokens = 0
@@ -267,6 +266,10 @@ class Handler(BaseHTTPRequestHandler):
                     if (reportedModel not in ("auto", "fast", "smart") and actualModel == "unknown"):
                         actualModel = reportedModel
                         self.writeSse("log", f"Model: {actualModel}")
+
+                ## Use the effective context reported by the loaded local model.
+                if data.get("contextLimit"):
+                    runtimeContext = data["contextLimit"]
 
                 ## The final gateway event may carry the only token usage report.
                 if "usage" in data and data["usage"]:
@@ -284,21 +287,22 @@ class Handler(BaseHTTPRequestHandler):
                         reply += token
                         self.writeSse("token", json.dumps(token))
 
-            ## File capture runs only after the gateway confirms a complete response.
+            ## File capture runs only after the gateway confirms a complete response."contextLimit": contextLimit
             if reply: self.writeSse("artifacts", json.dumps(captureOutputs(reply, chatId)))
 
             ## Disabled memory skips saving the chat but still allows output files.
             if not noMemory and reply:
-                mem.appendChat(query, reply, fileContexts if fileContexts else None)
+                mem.appendChat(query, reply, fileContexts if fileContexts else None, allowCompaction=not isLocal(model))
                 self.writeSse("log", "Chat saved to memory.")
 
             ## Use rough counts when the provider omits usage; these are not exact token totals.
             if totalTokens == 0 and reply:
+                estimatedUsage = True
                 completionTokens = int(len(reply.split()) * 1.3)
                 promptTokens = max(1, len(json.dumps(messages, ensure_ascii=False).encode("utf-8")) // 4,)
                 totalTokens = promptTokens + completionTokens
                 
-            contextLimit = getContextLimit(actualModel)
+            contextLimit = runtimeContext if isLocal(model) else getContextLimit(actualModel)
             ## The done event ends generation and updates the browser usage bar.
             self.writeSse(
                 "done",
@@ -309,6 +313,8 @@ class Handler(BaseHTTPRequestHandler):
                         "completionTokens": completionTokens,
                         "totalTokens": totalTokens,
                         "contextLimit": contextLimit,
+                        "localModel": isLocal(model),
+                        "estimatedUsage": estimatedUsage,
                     }
                 ),
             )

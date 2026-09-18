@@ -46,41 +46,38 @@ start_proxy() {
     echo ">> LiteLLM proxy started (PID $!)."
 }
 
-## Start one server per GGUF file on consecutive ports from 8000.
+## Start one lightweight service; model weights load only after a request arrives.
 start_local() {
-    MODEL_DIR="./models"
-    mkdir -p "$MODEL_DIR"
-    ## An empty model folder needs an empty array, not a literal *.gguf path.
-    shopt -s nullglob
-    MODEL_FILES=("$MODEL_DIR"/*.gguf)
-    shopt -u nullglob
+    mkdir -p models
 
-    LOCAL_MODEL_COUNT=${#MODEL_FILES[@]}
-    if [ "$LOCAL_MODEL_COUNT" -eq 0 ]; then
-        echo ">> No .gguf models found in $MODEL_DIR. Skipping local inference server(s)."
-        return
-    fi
+    ## Scan metadata without loading tensors into the startup process.
+    LOCAL_MODEL_COUNT=$(python3 -c 'from lib.localModels import scanModels; print(len(scanModels()))')
+    python3 core/generateLocalConfig.py
 
-    echo ">> Found $LOCAL_MODEL_COUNT local model(s) in $MODEL_DIR. Starting one server per model..."
+    echo ">> Found $LOCAL_MODEL_COUNT supported local model(s). Loading one at a time on demand."
+    nohup setsid python3 core/localServer.py > core/local.log 2>&1 &
+    echo ">> Local service started (PID $!)."
 
-    local port=8000
-    for model_file in "${MODEL_FILES[@]}"; do
-        local model_name
-        model_name=$(basename "$model_file")
-        model_name="${model_name%.gguf}"
+    ## Verify service readiness without allocating model weights.
+    python3 - <<'PY'
+import time
+import requests
+from lib.proxyClient import PROXY_HEADERS
 
-        echo ">> Starting local inference server for $model_file on port $port (alias: local:$model_name)..."
-        nohup setsid python3 -m llama_cpp.server --model "$model_file" --port "$port" --host 127.0.0.1 \
-            > "core/local_model_${model_name}.log" 2>&1 &
-        echo ">> Local inference server started (PID $!)."
-
-        port=$((port + 1))
-    done
-
-    ## Pass the startup file order unchanged so model ports and aliases match.
-    python3 core/generateLocalConfig.py "${MODEL_FILES[@]}"
-    echo ">> Generated cloud/local and offline configurations."
-
+for attempt in range(50):
+    try:
+        response = requests.get(
+            "http://127.0.0.1:8000/health",
+            headers=PROXY_HEADERS,
+            timeout=1,
+        )
+        response.raise_for_status()
+        break
+    except requests.RequestException:
+        time.sleep(0.2)
+else:
+    raise SystemExit("Local service failed to start; see core/local.log")
+PY
 }
 
 ## The UI forwards completions through the authenticated gateway.
@@ -128,7 +125,7 @@ case "$COMMAND" in
     offline)
         start_local
         if [ "${LOCAL_MODEL_COUNT:-0}" -eq 0 ]; then
-            echo ">> [ERROR] No .gguf models found in ./models — nothing to run offline."
+	    echo ">> [ERROR] No supported local models found in ./models - nothing to run offline."
             exit 1
         fi
         start_proxy core/config.local.generated.yaml

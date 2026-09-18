@@ -146,13 +146,14 @@ def loadMemory() -> tuple[list, dict]:
     return messages, fileCache
 
 ## Save one user/assistant pair and compact history when the chat limit is exceeded.
-def appendChat(userContent: str, assistantContent: str, filesUsed: dict | None = None):
+def appendChat(userContent: str, assistantContent: str, filesUsed: dict | None = None, allowCompaction: bool = True,):
     graph = loadGraph()
     graph.append({"role": "user", "content": userContent, "ts": datetime.utcnow().isoformat()})
     graph.append({"role": "assistant", "content": assistantContent})
     
     ## Check the window in message pairs, then save the updated history.
-    if len(graph) > WINDOW_SIZE * 2: graph = compactChats(graph)
+    ## Local chats must not trigger the cloud-backed summary request.
+    if allowCompaction and len(graph) > WINDOW_SIZE * 2: graph = compactChats(graph)
     saveGraph(graph)
     if filesUsed: ## Save attachment metadata only after the chat has completed.
         existing = loadFiles()

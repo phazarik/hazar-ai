@@ -72,28 +72,53 @@
             <!-- Displays currently loaded files -->
             <div class="file-context" id="fileList">NO FILES ATTACHED.</div>
 
-            <!-- Toolbar: Model selection, Skills, and System Controls -->
-            <div class="toolbar-row">
-              <div class="tool-group">
+                        <!-- Toolbar: Model selection, Skills, and System Controls -->
+
+            <!-- First row: Model options on the left, Skills on the right -->
+            <div class="toolbar-row toolbar-split">
+              <div class="tool-group toolbar-left">
                 <span class="tool-label">Model:</span>
                 <button type="button" class="tool-btn active" data-model="auto" title="Choose a model automatically">Automatic</button>
                 <button type="button" class="tool-btn" data-model="fast" title="For quick, everyday questions">Quick</button>
                 <button type="button" class="tool-btn" data-model="smart" title="For harder questions and detailed work">Detailed</button>
                 <button type="button" class="tool-btn" data-model="local" title="Use a model installed on this device">Local</button>
 
-                <!-- Skill Selector placed right next to the model buttons -->
-                <span class="tool-label skill-label">Skill:</span>
-                <select id="skillSelector" class="tool-btn"> <option value="">None</option></select>
-                <button id="viewSkillBtn" class="tool-btn" type="button">View skill</button>
-
-                <!-- Max Tokens Toggle & Input -->
-                <span class="tool-label token-limit-label">
-                  <input type="checkbox" id="limitTokensToggle" checked title="Limit output length">
-		  Max Tokens:
+                <!-- Local choices are scanned without loading model weights. -->
+                <span
+                  id="localModelControls"
+                  class="local-model-controls local-model-inactive"
+                  aria-hidden="true"
+                >
+                  <select
+                    id="localModelSelector"
+                    class="tool-btn"
+                    aria-label="Local model"
+                  ></select>
+                  <button
+                    id="refreshLocalModels"
+                    type="button"
+                    class="tool-btn"
+                    title="Refresh local models"
+                    aria-label="Refresh local models"
+                  >
+                    <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+                  </button>
                 </span>
-                <input type="number" id="maxTokensInput" class="tool-btn" value="900" title="Maximum generated tokens">
               </div>
-              <div class="tool-group">
+
+              <!-- Skill Selector -->
+              <div class="tool-group toolbar-right">
+                <label class="tool-label" for="skillSelector">Skill:</label>
+                <select id="skillSelector" class="tool-btn">
+                  <option value="">None</option>
+                </select>
+                <button id="viewSkillBtn" class="tool-btn" type="button">View skill</button>
+              </div>
+            </div>
+
+            <!-- Second row: Controls on the left, Help and Status on the right -->
+            <div class="toolbar-row toolbar-split">
+              <div class="tool-group toolbar-left">
                 <span class="tool-label">Controls:</span>
                 <button type="button" class="tool-btn" id="optimizeTokensBtn" title="Lossless file deduplication and JSON compaction">
                   <i class="bi bi-lightning-charge"></i>
@@ -103,16 +128,35 @@
                   <i class="bi bi-cpu"></i>
                   <span class="btn-text">Memory: ON</span>
                 </button>
-		<button type="button" class="tool-btn" id="clearChatBtn" title="Clear displayed chat; retain memory">
+                <button type="button" class="tool-btn" id="clearChatBtn" title="Clear displayed chat; retain memory">
                   <i class="bi bi-trash"></i>
                   <span class="btn-text">Clear Chat</span>
                 </button>
-		<button type="button" class="tool-btn" id="clearMemoryBtn" title="Wipe conversation history">
+                <button type="button" class="tool-btn" id="clearMemoryBtn" title="Wipe conversation history">
                   <i class="bi bi-trash"></i>
                   <span class="btn-text">Clear Memory</span>
                 </button>
-		<span class="tool-label">Info:</span>
-		<button type="button" class="tool-btn" id="helpBtn" title="Show Help/Welcome Modal">
+
+                <!-- Max Tokens Toggle & Input -->
+                <label class="tool-label token-limit-label" for="limitTokensToggle">
+                  <input type="checkbox" id="limitTokensToggle" checked title="Limit output length">
+                  Max Tokens:
+                </label>
+                <input
+                  type="number"
+                  id="maxTokensInput"
+                  class="tool-btn"
+                  value="900"
+                  min="1"
+                  title="Maximum generated tokens"
+                  aria-label="Maximum generated tokens"
+                >
+              </div>
+
+              <!-- Information controls -->
+              <div class="tool-group toolbar-right">
+                <span class="tool-label">Info:</span>
+                <button type="button" class="tool-btn" id="helpBtn" title="Show Help/Welcome Modal">
                   <i class="bi bi-question-circle"></i>
                   <span class="btn-text">Help</span>
                 </button>
@@ -185,7 +229,8 @@
           <li>
             <strong>Model:</strong> "Automatic" picks a model based on the question.
 	    "Quick" suits everyday questions. "Detailed" suits harder tasks.
-	    "Local" uses an installed model and needs the local model server running.
+	    "Local" lists supported models in models/. One model loads at a time.
+	    Local inference has no provider quota, but the context window remains finite.
           </li>
           <li>
             <strong>Skill:</strong> Adds instructions for a particular task. Use the dropdown

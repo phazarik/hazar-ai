@@ -30,6 +30,7 @@ from proxyClient import streamCompletion, PROXY_HEADERS, modelInfoUrl
 from tokenOptimizer import optimizeFile, optimizeMessages, getContextLimit
 from outputManager import ARTIFACT_PROMPT, captureOutputs
 from systemPrompt import SYSTEM_PROMPT
+from localModels import isLocal, publicModels
 
 YELLOW = "\033[33m"
 RED = "\033[31m"
@@ -70,30 +71,30 @@ def main():
 ## Define the CLI model, file, skill, memory, and token options.
 def parseArguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Query the local LiteLLM Smart Proxy.")
-    parser.add_argument("--model", default="auto")
+    parser.add_argument("--model", default="auto", help="Tier alias or exact local model ID from --list-models")
+    parser.add_argument("--list-models", action="store_true", help="Scan local models, without loading weights")
     parser.add_argument("--query", default=None)
     parser.add_argument("--file", nargs="*")
     parser.add_argument("--max-tokens", type=int, default=900)
     parser.add_argument("--skill", default=None, help="Skill to inject (e.g. prompt-master)")
-    parser.add_argument(
-        "--skill-inspect",
-        default=None,
-        metavar="NAME",
-        help="Print full skill text and exit",
-    )
+    parser.add_argument("--skill-inspect", default=None, metavar="NAME", help="Print full skill text and exit")
     parser.add_argument("--no-memory", action="store_true")
     parser.add_argument("--clear-memory", action="store_true")
     parser.add_argument("--memory-status", action="store_true")
     parser.add_argument("--list-skills", action="store_true")
-    parser.add_argument(
-        "--optimize-tokens",
-        action="store_true",
-        help="Lossless file deduplication and JSON compaction",
-    )
+    parser.add_argument("--optimize-tokens", action="store_true", help="Lossless file deduplication and JSON compaction")
     return parser.parse_args()
 
 ## Run inspection or memory commands; return True when no completion is needed.
 def handleUtilityCommands(args: argparse.Namespace) -> bool:
+
+    ## List local model choices without starting an inference worker.
+    if args.list_models:
+        models = publicModels()
+        print("Local models:" if models else "No supported local models found in models/.")
+        for model in models: print(f"  - {model['id']} [{model['format']}]")
+        return True
+    
     if args.clear_memory:
         mem.clearMemory()
         return True
@@ -189,6 +190,7 @@ def streamResponse(args: argparse.Namespace, messages: list, finalQuery: str, fi
     }
     try:
         actualModel = "unknown"
+        runtimeContext = None ## Read local context metadata from the worker that loaded the model.
         console = Console()
         reply = ""
         promptTokens = 0
@@ -213,6 +215,10 @@ def streamResponse(args: argparse.Namespace, messages: list, finalQuery: str, fi
                     reported = data["model"]
                     if reported not in ("auto", "fast", "smart"): actualModel = reported
 
+                ## Local context comes from the worker rather than cloud metadata.
+                if data.get("contextLimit"):
+                    runtimeContext = data["contextLimit"]
+
                 ## Some providers send usage only in the final event.
                 if "usage" in data and data["usage"]:
                     u = data["usage"]
@@ -236,17 +242,21 @@ def streamResponse(args: argparse.Namespace, messages: list, finalQuery: str, fi
 
         ## Store the chat only after the same successful completion check.
         if not args.no_memory and reply:
-            mem.appendChat(finalQuery, reply, fileContexts if fileContexts else None)
+            mem.appendChat(query, reply, fileContexts if fileContexts else None, allowCompaction=not isLocal(model))
             print("\n>> Chat saved to memory.")
 
         ## Missing usage gets a rough estimate; this is not an exact tokenizer count.
         if totalTokens == 0 and reply:
             completionTokens = int(len(reply.split()) * 1.3)
-            promptTokens = int(len(finalQuery.split()) * 1.3)
+            promptTokens = max(1, len(json.dumps(messages, ensure_ascii=False).encode("utf-8")) // 4)
+            print(">> Token counts are estimates; backend did not supply usage.")
             totalTokens = promptTokens + completionTokens
 
-        contextLimit = getContextLimit(actualModel)
-        print(f"\n{formatUsage(promptTokens, completionTokens, totalTokens, contextLimit)}\n")
+        ## Local inference has no provider quota, but context remains finite.
+        local = isLocal(args.model)
+        contextLimit = runtimeContext if local else getContextLimit(actualModel)
+        if local: print(">> Local model: no provider token quota. Context includes prompt + reply.")
+        print(f"\n{formatUsage(promptTokens, completionTokens, totalTokens, contextLimit, local)}\n")
 
     except KeyboardInterrupt:
         print(f"\n{YELLOW}>> Stopped.{RESET}")
@@ -270,20 +280,30 @@ def buildPanel(text: str, title: str) -> Panel:
     if text.count("```") % 2 != 0: text += "\n```"
     return Panel(Markdown(text, code_theme="bw"), title=title, border_style="green", width=110)
 
-## Show token usage and compare prompt tokens with the reported input limit.
-def formatUsage(promptTokens: int, completionTokens: int, totalTokens: int, contextLimit: int | None) -> str:
+## Show token counts against local context or the provider's reported input limit.
+def formatUsage(promptTokens: int, completionTokens: int, totalTokens: int,
+    contextLimit: int | None, local: bool = False) -> str:
+    
     usage = (
         f"Tokens — prompt: {promptTokens} + completion: "
         f"{completionTokens} = total: {totalTokens}\n"
     )
-    if contextLimit is None or contextLimit <= 0: return usage + "Input-token limit: unknown"
-    pct = promptTokens / contextLimit * 100
+    label = "Context window" if local else "Input-token limit"
+
+    ## Missing metadata stays unknown rather than becoming an infinite limit.
+    if contextLimit is None or contextLimit <= 0: return usage + label + ": unknown"
+
+    ## Local prompt and reply occupy the same context window.
+    usedTokens = promptTokens + completionTokens if local else promptTokens
+    pct = usedTokens / contextLimit * 100
     filled = max(0, min(100, int(pct)))
     bar = "█" * filled + "░" * (100 - filled)
+    units = "context tokens" if local else "reported input tokens"
+
     return (
         usage
         + f"{bar} {YELLOW}{BOLD}{pct:.2f}%{RESET} "
-        + f"of {contextLimit:,} reported input tokens"
+        + f"of {contextLimit:,} {units}"
     )
 
 ## Parse JSON and return an empty dictionary if parsing fails.

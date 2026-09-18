@@ -21,7 +21,8 @@ REQUIRED_FILES = [
     "core/config.yaml",
     "core/routerHook.py",
     "core/apiKeys.sh",
-    "core/litellm.env.example",
+    "core/localServer.py",
+    "core/localWorker.py",
     "start.sh",
     "kill.sh",
     "query.py",
@@ -34,6 +35,7 @@ REQUIRED_FILES = [
     "lib/proxyClient.py",
     "lib/tokenOptimizer.py",
     "lib/outputManager.py",
+    "lib/localModels.py",
     ".image/logo.png",
 ]
 

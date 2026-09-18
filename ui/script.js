@@ -251,8 +251,22 @@ document.addEventListener("DOMContentLoaded", () => {
                 .forEach((b) => b.classList.remove("active"));
             e.currentTarget.classList.add("active");
             selectedModel = e.currentTarget.getAttribute("data-model");
+
+	    // Preserve toolbar dimensions while showing or hiding local choices.
+            const localControls = document.getElementById("localModelControls");
+            const localSelected = selectedModel === "local";
+            localControls.classList.toggle("local-model-inactive", !localSelected);
+            localControls.setAttribute("aria-hidden", String(!localSelected));
+            if (selectedModel === "local") refreshLocalModels();
         });
     });
+
+    // Store the exact model ID selected from the local dropdown.
+    document.getElementById("localModelSelector").addEventListener("change", (event) => {
+        selectedModel = event.target.value || "local";
+    });
+    // Rescan after adding or removing files in models/.
+    document.getElementById("refreshLocalModels").addEventListener("click", refreshLocalModels);
 
     // Max Tokens Toggle UX
     const limitToggle = document.getElementById("limitTokensToggle");
@@ -727,6 +741,39 @@ function createMsgBox(role) {
     return content; // Return the content element for later streamed text
 }
 
+// Refresh model metadata without loading inference weights.
+async function refreshLocalModels() {
+    const selector = document.getElementById("localModelSelector");
+    const previous = selector.value;
+    try {
+        const response = await fetch("/api/models");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        selector.replaceChildren();
+        // Keep filenames plain text when building dropdown options.
+        for (const model of data.models) {
+            const option = document.createElement("option");
+            option.value = model.id;
+            option.textContent = `${model.name} [${model.format}]`;
+            selector.appendChild(option);
+        }
+        // Disable an empty list and preserve the previous choice when possible.
+        selector.disabled = data.models.length === 0;
+        if (selector.disabled) {
+            const option = document.createElement("option");
+            option.textContent = "No supported local models found";
+            selector.appendChild(option);
+        } else if (data.models.some((model) => model.id === previous)) {
+            selector.value = previous;
+        }
+        // A delayed scan must not override a subsequent cloud button click.
+	if (!document.getElementById("localModelControls").classList.contains("local-model-inactive")) {
+            selectedModel = selector.disabled ? "local" : selector.value;
+        }
+    } catch (error) { appendLog(`Could not scan local models: ${error.message}`, true); }
+}
+
+
 // -----------------------------------------------------------------------------
 // Core Network Handler & SSE Stream Management
 // -----------------------------------------------------------------------------
@@ -735,6 +782,15 @@ function createMsgBox(role) {
 async function sendQuery() {
     const queryInput = document.getElementById("queryInput");
     if (isGenerating) return;
+    // Resolve a concrete local model before submitting the request.
+    if (selectedModel === "local") {
+        await refreshLocalModels();
+        if (selectedModel === "local") {
+            appendLog("Choose a supported model from models/ before sending.", true);
+            return;
+        }
+    }
+    if (isGenerating) return; // Another click may have completed the awaited scan first.
     const sendBtn = document.getElementById("sendBtn");
     const attachBtn = document.getElementById("attachBtn");
     const bufferIcon = document.getElementById("loadingBuffer");
@@ -907,19 +963,20 @@ async function sendQuery() {
 			const bar = document.getElementById("tokBarFill");
 
 			const usage =
-			      `Model: ${stats.model} | Prompt: ${promptTokens.toLocaleString()}` +
+			      `Model: ${stats.model}${stats.estimatedUsage ? " (estimated tokens)" : ""}` +
+                              `${stats.localModel ? " | Provider quota: none" : ""} | Prompt: ${promptTokens.toLocaleString()}` +
 			      ` | Reply: ${completionTokens.toLocaleString()}`;
 
 			if (Number.isFinite(limit) && limit > 0) {
-			    const pct = Math.max(0, (promptTokens / limit) * 100);
+			    const pct = Math.max(0, ((stats.localModel ? promptTokens + completionTokens : promptTokens) / limit) * 100);
 			    statsText.textContent =
-				`${usage} | Input limit: ${limit.toLocaleString("en-US")}` +
+				`${usage} | ${stats.localModel ? "Context window" : "Input limit"}: ${limit.toLocaleString("en-US")}` +
 				` (${pct.toFixed(2)}% used)`;
 			    bar.style.width = `${Math.min(100, pct)}%`;
 			    bar.parentElement.hidden = false;
 			}
 			else {
-			    statsText.textContent = `${usage} | Input limit: unknown`;
+			    statsText.textContent = `${usage} | ${stats.localModel ? "Context window" : "Input limit"}: unknown`;
 			    bar.style.width = "0%";
 			    bar.parentElement.hidden = true;
 			}
