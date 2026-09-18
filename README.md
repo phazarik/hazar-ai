@@ -3,13 +3,20 @@
 ![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg) [![LiteLLM proxy](https://img.shields.io/badge/LiteLLM-proxy-orange)](https://github.com/BerriAI/litellm) [![Requests](https://img.shields.io/badge/Requests-HTTP-blue)](https://pypi.org/project/requests/) [![Rich](https://img.shields.io/badge/Rich-terminal-purple)](https://pypi.org/project/rich/) [![Pyfiglet](https://img.shields.io/badge/Pyfiglet-ASCII%20text-green)](https://pypi.org/project/pyfiglet/) [![PyYAML](https://img.shields.io/badge/PyYAML-config-red)](https://pypi.org/project/PyYAML/) [![llama-cpp-python server](https://img.shields.io/badge/llama--cpp--python-server-yellow)](https://pypi.org/project/llama-cpp-python/)
 [![Marked](https://img.shields.io/badge/Marked-9.1.6-blue)](https://github.com/markedjs/marked) [![Highlight.js](https://img.shields.io/badge/Highlight.js-11.9.0-orange)](https://github.com/highlightjs/highlight.js) [![Bootstrap Icons](https://img.shields.io/badge/Bootstrap%20Icons-1.11.3-purple)](https://github.com/twbs/icons) [![KaTeX](https://img.shields.io/badge/KaTeX-0.16.9-green)](https://github.com/KaTeX/KaTeX) [![marked-katex-extension](https://img.shields.io/badge/marked--katex--extension-5.0.0-blue)](https://github.com/UziTech/marked-katex-extension) [![DOMPurify](https://img.shields.io/badge/DOMPurify-3.0.6-red)](https://github.com/cure53/DOMPurify) [![Google Fonts](https://img.shields.io/badge/Google%20Fonts-Fira%20Code-gray)](https://fonts.google.com/specimen/Fira+Code)
 
-[Quick start](#first-time-setup) · [How it works](#how-it-works) · [CLI examples](#cli-examples) · [Offline use](#local-models-and-offline-use) · [Compare tools](#how-it-compares-against-existing-tools) · [Troubleshooting](#when-something-goes-wrong)
-
 Running cloud models can get expensive, and free tiers have limits. Hazar-AI brings your configured providers and local models into one place, with routing and retries to help keep a chat moving when a route is temporarily unavailable.
 
 This is a local chat setup, with a **terminal** interface, a **browser** interface, and a **VS Code** connection through the Continue extension, for **free access to _hazars_ of cloud and local language models**. It puts model choices, file attachments, optional skills, and saved conversations in one setup. If a configured model is temporarily unavailable, the app can try another route before a reply starts. It does not remove provider limits or make paid models free. Costs and access still depend on the selected providers and accounts.
 
+[![Quick start](https://img.shields.io/badge/▶_Quick_start-238636?style=for-the-badge)](https://github.com/phazarik/hazar-ai#first-time-setup)
+[![How it works](https://img.shields.io/badge/How_it_works-30363d?style=for-the-badge)](https://github.com/phazarik/hazar-ai#how-it-works)
+[![CLI examples](https://img.shields.io/badge/CLI_examples-30363d?style=for-the-badge)](https://github.com/phazarik/hazar-ai#cli-examples)
+[![Offline use](https://img.shields.io/badge/Offline_use-30363d?style=for-the-badge)](https://github.com/phazarik/hazar-ai#local-models-and-offline-use)
+[![Compare tools](https://img.shields.io/badge/Compare_tools-30363d?style=for-the-badge)](https://github.com/phazarik/hazar-ai#how-it-compares-against-existing-tools)
+[![Troubleshooting](https://img.shields.io/badge/Troubleshooting-30363d?style=for-the-badge)](https://github.com/phazarik/hazar-ai#when-something-goes-wrong)
+
 ## What is included
+
+ ![Browser chat](.image/ui.png) 
 
 - Automatic model selection, plus quick, detailed, and local options and VS Code integration.
 - Streaming replies in the terminal and browser, which are faster than typical AI apps.
@@ -266,8 +273,6 @@ Hazar-AI reads skill text; it does not install or execute upstream hooks, script
 
 Open **http://localhost:5000** after starting the full setup.
 
- ![Browser chat](.image/ui.png) 
-
 <table>
 <thead>
 <tr><th>Control</th><th>What happens</th></tr>
@@ -515,7 +520,7 @@ This tests UI startup; chat replies still need a running gateway. Keep the same 
 
 ### A model returns 404, 401, or repeated errors
 
-Check `core/litellm.log`, verify the provider key, and run `python3 findModels.py`. Update model identifiers and remove unavailable deployments from `core/config.yaml`, then restart. Retries can help temporary failures; they cannot fix invalid credentials or permanently unavailable models. If a reply has already started, the app does not silently replay it on another model. Partial output stays visible and the prompt is restored for another attempt.
+Check `core/litellm.log`, verify the provider key, and run `python3 findModels.py`. Update model identifiers and remove unavailable deployments from `core/config.yaml`, then restart. Retries can help temporary failures; they cannot fix invalid credentials or permanently unavailable models. If a reply has already started, the app does not silently replay it on another model. Partial output stays visible, and the prompt is restored for another attempt.
 
 ### No skill appears
 
