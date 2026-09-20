@@ -55,6 +55,8 @@ Upstream details: [OmniRoute README](https://github.com/diegosouzapw/OmniRoute#r
 The repository is structured as follows. Important files are shown.
 
 ```text
+├── .devcontainer/                      # Python 3.11 development-container and Codespaces setup
+├── .github/workflows/python-app.yml    # Python lint and test workflow
 ├── core/
 │   ├── config.yaml                    # Edit persistent cloud model routes here
 │   ├── ...
@@ -64,7 +66,8 @@ The repository is structured as follows. Important files are shown.
 ├── ui/                                # Browser interface, styling, and HTTP backend
 ├── findModels.py                      # List models offered by configured cloud providers
 ├── query.py                           # CLI chat
-├── requirements.txt                   # Main application and GGUF backend dependencies
+├── requirements.txt                   # Main gateway, terminal, and web dependencies
+├── requirements-local-gguf.txt        # Optional llama.cpp dependencies for GGUF models
 ├── requirements-local-hf.txt          # Additional dependencies for Transformers models
 ├── setup.py                           # Prepare folders, credentials, and Continue integration
 ├── start.sh                           # Start the selected services; supports offline mode
@@ -106,21 +109,13 @@ Using Conda:
 conda create -n llm python=3.11 -y
 conda activate llm
 python3 -m pip install -r requirements.txt
-```
-Use one environment, and activate it again in every terminal that runs the Python tools. `requirements.txt` installs the main application dependencies and the llama.cpp backend used for GGUF models.
 
-For supported Hugging Face Transformers model folders, also install:
-
-```bash
+# Optional: install only the local-model backends needed.
+python3 -m pip install -r requirements-local-gguf.txt
 python3 -m pip install -r requirements-local-hf.txt
 ```
-For optional GGUF local models, also install:
 
-```bash
-python3 -m pip install -r requirements-local-gguf.txt
-```
-
-The optional requirements add PyTorch, Transformers, Accelerate, and Safetensors. Install them in the same environment as the application. Both local backends use CPU inference by default. GPU acceleration requires a suitable PyTorch installation or `llama.cpp` build, plus the corresponding local-backend settings described below.
+Use one environment, and activate it again in every terminal that runs the Python tools. `requirements.txt` installs the gateway, terminal, and web dependencies. The GGUF requirements add the llama.cpp backend; the Hugging Face requirements add PyTorch, Transformers, Accelerate, and Safetensors. Install only the required local backends in the same environment as the application. Both use CPU inference by default. GPU acceleration requires a suitable PyTorch installation or `llama.cpp` build, plus the corresponding local-backend settings described below.
 
 If `llama-cpp-python` needs a source build, install compiler tools first. On Ubuntu or Debian:
 ```bash
@@ -648,7 +643,7 @@ Check `core/litellm.log`, verify the provider key, and run `python3 findModels.p
 
 Run `python3 query.py --list-models`. For GGUF, check that the download is complete and every split part is present. For Transformers, check the configuration, tokenizer, weights, and any shard index. A lone Safetensors shard is not a complete model.
 
-Install `requirements-local-hf.txt` when using Transformers models, then check `core/local.log` for loading errors. Unsupported architectures, quantization formats, or insufficient RAM/VRAM can prevent loading.
+Install `requirements-local-gguf.txt` for GGUF models or `requirements-local-hf.txt` for Transformers models, then check `core/local.log` for loading errors. Unsupported architectures, quantization formats, or insufficient RAM/VRAM can prevent loading.
 
 For context-limit errors, reduce attachments, skill text, history, or the requested reply length. A local HTTP 409 response means another inference request is active; wait for it to finish.
 
