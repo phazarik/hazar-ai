@@ -8,6 +8,7 @@
 # The service is only written here; starting or enabling it is a separate step.
 # ----------------------------------------------------------------------------
 
+import getpass
 import json
 import os
 import secrets
@@ -39,6 +40,12 @@ REQUIRED_FILES = [
     "lib/localModels.py",
     ".image/logo.png",
 ]
+PROVIDER_KEYS = (
+    ("OPENROUTER_API_KEY", "OpenRouter"),
+    ("GEMINI_API_KEY", "Gemini"),
+    ("GROQ_API_KEY", "Groq"),
+    ("TAVILY_API_KEY", "Tavily"),
+)
 
 def main():
     ## Startup scripts use Bash and Linux process tools, so setup runs inside Linux/WSL.
@@ -65,7 +72,7 @@ def main():
     ## Generate integrations after the client has read the newly created gateway key.
     configureContinue(PROXY_URL, gatewayKey)
     configureService(executable)
-    print(">> Setup complete. Add provider keys to core/litellm.env, then run bash start.sh.")
+    print(">> Setup complete. Provider keys are stored in core/litellm.env; run bash start.sh.")
     print(">> For optional systemd use: systemctl --user daemon-reload")
 
 # ----------------
@@ -80,6 +87,27 @@ def writeText(path, content, private=False):
     with open(path, "w", encoding="utf-8") as outputFile: outputFile.write(content)
     os.chmod(path, 0o600 if private else 0o644)
 
+def environmentValue(lines, target):
+    ## Treat missing, empty, malformed, and obvious example values as incomplete.
+    for line in lines:
+        name, separator, value = line.strip().removeprefix("export ").partition("=")
+        if separator and name.strip() == target:
+            try: parsed = shlex.split(value, comments=True)
+            except ValueError: return ""
+            candidate = parsed[0].strip() if parsed else ""
+            return "" if not candidate or "XXXX" in candidate.upper() else candidate
+    return ""
+
+def setEnvironmentValue(lines, target, value):
+    ## Replace an existing incomplete assignment in place; append absent settings.
+    replacement = target + "=" + shlex.quote(value)
+    for index, line in enumerate(lines):
+        name, separator, unused = line.strip().removeprefix("export ").partition("=")
+        if separator and name.strip() == target:
+            lines[index] = replacement
+            return
+    lines.append(replacement)
+
 def prepareEnvironment():
     # ---------------------------------------------------------------------------
     # Create an editable provider-key file and a private gateway key.
@@ -89,9 +117,19 @@ def prepareEnvironment():
     # ---------------------------------------------------------------------------
     envPath = os.path.join(BASE_DIR, "core", "litellm.env")
 
-    ## Copy the blank template only once; keep existing provider keys on reruns.
-    if not os.path.isfile(envPath): shutil.copyfile(envPath + ".example", envPath)
-    with open(envPath, encoding="utf-8") as envFile: lines = envFile.read().splitlines()
+    ## Read only the private environment file; start empty when it does not exist.
+    lines = []
+    if os.path.isfile(envPath):
+        with open(envPath, encoding="utf-8") as envFile: lines = envFile.read().splitlines()
+
+    ## Check provider keys in configured order and securely ask only for missing values.
+    missing = [(name, label) for name, label in PROVIDER_KEYS if not environmentValue(lines, name)]
+    if missing and sys.stdin.isatty():
+        for name, label in missing:
+            value = getpass.getpass(f">> {label} API key (leave empty to skip): ").strip()
+            if value: setEnvironmentValue(lines, name, value)
+    elif missing:
+        print(">> Provider-key prompts skipped because setup is not running in an interactive terminal.")
 
     ## A process-level gateway key takes precedence over the env file value.
     key = os.environ.get("LITELLM_MASTER_KEY", "")
