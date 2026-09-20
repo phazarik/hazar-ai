@@ -129,25 +129,39 @@ sudo apt install build-essential cmake
 ```
 GPU support needs an appropriate llama.cpp build; the default installation does not guarantee GPU acceleration.
 
-### 3. Create the key file
+### 3. Prepare provider keys
 
-Generate API keys to access the cloud-based models.:
-- [OpenRouter](https://openrouter.ai/workspaces/default/keys): an API gateway for models from different providers. 
+Generate keys for the cloud providers that will be used:
+- [OpenRouter](https://openrouter.ai/workspaces/default/keys): an API gateway for models from different providers.
 - [Google AI Studio](https://aistudio.google.com/app/api-keys): Gemini API keys.
-- [Groq](https://console.groq.com/keys): another hosted inference provider.
+- [Groq](https://console.groq.com/keys): hosted inference models.
+- [Tavily](https://app.tavily.com/home): optional web-search API key.
 
-Write an environment file `core/litellm.env` and put the API keys there. It should look like the following
+Keys may be added to `core/litellm.env` before setup, for example:
 ```bash
-OPENROUTER_API_KEY=sk-or-v1-XXXXXXXXXXXX
-GEMINI_API_KEY=AQ.XXXXXXXXXXXX
-GROQ_API_KEY=gsk_XXXXXXXXXXXX
-LITELLM_MASTER_KEY=""      # Leave as "" on a new setup; setup generates this
+OPENROUTER_API_KEY="your-key"
+GEMINI_API_KEY="your-key"
+GROQ_API_KEY="your-key"
+TAVILY_API_KEY="your-key"
 ```
-These keys are read by `core/config.yaml`. Unused keys can stay empty. 
+Creating this file manually is optional. Setup checks the real private file in the order shown, preserves existing values, and securely asks only for missing keys. Press Enter to skip an unused provider. For an offline installation, skip every provider key. Keep `core/litellm.env` private; it is excluded from Git.
 
-Leave `LITELLM_MASTER_KEY` empty on a new installation. The setup generates a private gateway key and connects the local clients to it. An existing usable key is retained; the old `sk-anything` placeholder is replaced. Keep the private key file out of Git. For an offline installation, provider keys can all stay empty.
+### 4. Run setup
 
-### 4. Check the configured models
+```bash
+python3 setup.py
+```
+Setup checks required files, creates or updates `core/litellm.env`, makes scripts executable, creates `models/`, and writes:
+
+- Continue settings to `~/.continue/config.yaml`.
+- The Continue gateway secret to `~/.continue/.env`.
+- An optional user service to `~/.config/systemd/user/litellm.service`.
+
+Setup does not start the services. It preserves existing provider keys, prompts only for missing values in an interactive terminal, and **overwrites the generated Continue configuration**. Backup manual Continue changes before rerunning it.
+
+> **Gateway key:** Setup generates `LITELLM_MASTER_KEY` if no valid key exists and saves it in `core/litellm.env`. Later runs retain the saved valid key. For Windows-side Continue, copy this key into the active Continue configuration's `apiKey` field once. Setup running in WSL writes only the Linux-side Continue files.
+
+### 5. Check the configured models
 
 ```bash
 python3 findModels.py
@@ -164,20 +178,6 @@ python3 query.py --list-models
 This scans model metadata without loading model weights. Download instructions and supported formats are covered in [Local models and offline use](#local-models-and-offline-use).
 
 Keep the client aliases `auto`, `fast`, `smart`, and `local`. These are the names used by the CLI and GUI; provider model identifiers belong inside their deployments.
-
-### 5. Run setup
-
-```bash
-python3 setup.py
-```
-Setup checks required files, prepares the environment file, makes scripts executable, creates `models/`, and writes:
-
-- Continue settings to `~/.continue/config.yaml`.
-- The Continue gateway secret to `~/.continue/.env`.
-- An optional user service to `~/.config/systemd/user/litellm.service`.
-
-Setup does not start the services. It preserves existing provider keys, but **overwrites the generated Continue configuration**. Backup manual Continue changes before rerunning it.
-> **Gateway key:** Setup generates `LITELLM_MASTER_KEY` if no valid key exists and saves it in `core/litellm.env`. Later runs retain the saved valid key. For Windows-side Continue, copy this key into the active Continue configuration's `apiKey` field once. Setup running in WSL writes only the Linux-side Continue files.
 
 ### 6. Start and try a message
 
