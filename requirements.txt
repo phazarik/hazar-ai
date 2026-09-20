@@ -9,4 +9,3 @@ requests
 rich
 pyfiglet
 PyYAML
-llama-cpp-python[server]

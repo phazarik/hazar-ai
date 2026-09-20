@@ -1,0 +1,8 @@
+# ----------------------------------------------------------------------------
+# Optional GGUF local-model dependencies
+#
+# Install this file only when running GGUF models through llama.cpp.
+# A compiler and CMake may be required when a compatible wheel is unavailable.
+# ----------------------------------------------------------------------------
+
+llama-cpp-python[server]

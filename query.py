@@ -242,7 +242,7 @@ def streamResponse(args: argparse.Namespace, messages: list, finalQuery: str, fi
 
         ## Store the chat only after the same successful completion check.
         if not args.no_memory and reply:
-            mem.appendChat(query, reply, fileContexts if fileContexts else None, allowCompaction=not isLocal(model))
+            mem.appendChat(args.query, reply, fileContexts if fileContexts else None, allowCompaction=not isLocal(args.model))
             print("\n>> Chat saved to memory.")
 
         ## Missing usage gets a rough estimate; this is not an exact tokenizer count.

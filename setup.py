@@ -165,7 +165,7 @@ def configureService(executable):
         "[Unit]\nDescription=LiteLLM proxy\nAfter=network.target\n\n"
         "[Service]\n"
         f'WorkingDirectory="{BASE_DIR}"\n'
-        f'Environment="PYTHONPATH={BASE_DIR}"\n'
+        f'Environment="PYTHONPATH={BASE_DIR}/core:{BASE_DIR}"\n'
         f'EnvironmentFile="{BASE_DIR}/core/litellm.env"\n'
         f'ExecStart="{executable}" --config "{BASE_DIR}/core/config.yaml" --port 4000\n'
         "Restart=on-failure\n\n[Install]\nWantedBy=default.target\n"

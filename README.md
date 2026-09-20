@@ -114,6 +114,11 @@ For supported Hugging Face Transformers model folders, also install:
 ```bash
 python3 -m pip install -r requirements-local-hf.txt
 ```
+For optional GGUF local models, also install:
+
+```bash
+python3 -m pip install -r requirements-local-gguf.txt
+```
 
 The optional requirements add PyTorch, Transformers, Accelerate, and Safetensors. Install them in the same environment as the application. Both local backends use CPU inference by default. GPU acceleration requires a suitable PyTorch installation or `llama.cpp` build, plus the corresponding local-backend settings described below.
 
