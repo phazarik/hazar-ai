@@ -16,6 +16,7 @@ import shutil
 import stat
 import sys
 from lib.systemPrompt import SYSTEM_PROMPT
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REQUIRED_FILES = [
     "core/config.yaml",
@@ -50,7 +51,7 @@ def main():
     ## Find the gateway in the active environment before creating config files.
     executable = shutil.which("litellm")
     if not executable: sys.exit("Install dependencies first: python3 -m pip install -r requirements.txt")
-        
+
     prepareEnvironment()
     for name in ("start.sh", "kill.sh", "query.py", "core/apiKeys.sh"):
         path = os.path.join(BASE_DIR, name)
@@ -75,10 +76,9 @@ def writeText(path, content, private=False):
     ## Create parent folders and write text; protect private credential files.
     ## Private files use owner-only permissions; normal config files remain readable.
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    mode = 0o600 if private else 0o644
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as outputFile: outputFile.write(content)
-    if private: os.chmod(path, 0o600)
+    if os.path.islink(path) and not os.path.exists(path): os.unlink(path)
+    with open(path, "w", encoding="utf-8") as outputFile: outputFile.write(content)
+    os.chmod(path, 0o600 if private else 0o644)
 
 def prepareEnvironment():
     # ---------------------------------------------------------------------------
@@ -100,16 +100,16 @@ def prepareEnvironment():
         if separator and name.strip() == "LITELLM_MASTER_KEY" and not key:
             parsed = shlex.split(value, comments=True)
             key = parsed[0] if parsed else ""
-            
+
     ## Replace missing keys and the old shared placeholder with a random private key.
     if not key or key == "sk-anything": key = "sk-" + secrets.token_hex(32)
-    
+
     ## Drop only the old master-key assignment, keeping provider settings and comments.
     retained = []
     for line in lines:
         name = line.strip().removeprefix("export ").partition("=")[0].strip()
         if name != "LITELLM_MASTER_KEY": retained.append(line)
-        
+
     retained.append("LITELLM_MASTER_KEY=" + shlex.quote(key))
     writeText(envPath, "\n".join(retained) + "\n", private=True)
     os.environ["LITELLM_MASTER_KEY"] = key
@@ -117,17 +117,24 @@ def prepareEnvironment():
 def configureContinue(proxyUrl, gatewayKey):
     ## Write Continue configuration and copy only the gateway credential.
     directory = os.path.expanduser("~/.continue")
+
+    ## Replace a broken Continue-directory symlink and ensure the directory exists.
+    if os.path.islink(directory) and not os.path.exists(directory): os.unlink(directory)
+    os.makedirs(directory, exist_ok=True)
+
     secretPath = os.path.join(directory, ".env")
+    destination = os.path.join(directory, "config.yaml")
 
     ## Keep unrelated Continue secrets and replace only the local gateway credential.
     secretLines = []
     if os.path.isfile(secretPath):
         with open(secretPath, encoding="utf-8") as secretFile:
             for line in secretFile.read().splitlines():
-                if not line.startswith("LITELLM_MASTER_KEY="): secretLines.append(line)
+                if not line.startswith("LITELLM_MASTER_KEY="):
+                    secretLines.append(line)
     secretLines.append("LITELLM_MASTER_KEY=" + shlex.quote(gatewayKey))
     writeText(secretPath, "\n".join(secretLines) + "\n", private=True)
-    
+
     ## Continue needs the API base URL rather than the completion endpoint itself.
     apiBase = proxyUrl.rsplit("/chat/completions", 1)[0]
     config = (
@@ -141,8 +148,7 @@ def configureContinue(proxyUrl, gatewayKey):
     ## Include the shared personality alongside Continue's own instructions.
     config += "\nrules:\n"
     config += "  - " + json.dumps(SYSTEM_PROMPT) + "\n"
-    
-    destination = os.path.join(directory, "config.yaml")
+
     writeText(destination, config)
     print(f">> Continue configuration: {destination}")
 
