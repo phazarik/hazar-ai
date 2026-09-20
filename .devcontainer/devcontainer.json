@@ -10,9 +10,28 @@
   "name": "hazar-ai Environment",
   // Match the Python version required by the gateway.
   "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  // Recommend personal Codespaces secrets without storing their values in Git.
+  "secrets": {
+    "OPENROUTER_API_KEY": {
+      "description": "Optional OpenRouter API key for cloud model routes.",
+      "documentationUrl": "https://openrouter.ai/settings/keys"
+    },
+    "GEMINI_API_KEY": {
+      "description": "Optional Google AI Studio API key for Gemini routes.",
+      "documentationUrl": "https://aistudio.google.com/app/api-keys"
+    },
+    "GROQ_API_KEY": {
+      "description": "Optional Groq API key for hosted model routes.",
+      "documentationUrl": "https://console.groq.com/keys"
+    },
+    "TAVILY_API_KEY": {
+      "description": "Optional Tavily API key for web search.",
+      "documentationUrl": "https://app.tavily.com/home"
+    }
+  },
   // Install requirements and generate integration files after creation.
   "postCreateCommand": "bash .devcontainer/setup.sh",
-  "postAttachCommand": "echo -e '\\033[1;33mPlease enter your API keys in core/litellm.env before running ./start.sh\\033[0m'",
+  "postAttachCommand": "echo -e '\\033[1;33mCodespaces secrets are loaded automatically. Otherwise run python3 setup.py to enter missing keys, then run bash start.sh all.\\033[0m'",
   // Add Python editor support inside the container workspace.
   "customizations": {
     "vscode": {
@@ -25,5 +44,17 @@
   "forwardPorts": [
     5000,
     4000
-  ]
+  ],
+  // Keep the unauthenticated UI private and label both forwarded services.
+  "portsAttributes": {
+    "5000": {
+      "label": "Hazar-AI Web UI",
+      "onAutoForward": "openBrowser",
+      "visibility": "private"
+    },
+    "4000": {
+      "label": "LiteLLM Gateway",
+      "visibility": "private"
+    }
+  }
 }
